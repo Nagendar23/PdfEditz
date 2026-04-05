@@ -7,7 +7,8 @@ import testUpload from './routes/testUpload.js'
 import authRouter from "./routes/authRoute.js";
 import authMiddleware from "./middleware/authMiddleware.js";
 import fileRouter from "./routes/fileRoute.js";
-
+import cron from 'node-cron';
+import cleanUpExpiredFiles from "./utils/cleanup.js";
 
 const app = express()
 dotenv.config()
@@ -18,6 +19,12 @@ app.use("/uploads", express.static("uploads"));
 connectDB();
 
 const PORT = process.env.PORT || 8000
+
+//run everyday at 12AM
+cron.schedule("0 0 * * *",async()=>{
+    console.log("Starting scheduled cleanup...")
+    await cleanUpExpiredFiles()
+})
 
 app.get('/',(req,res)=>{
     res.send("backend is working")

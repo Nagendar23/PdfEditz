@@ -24,7 +24,7 @@ const fileSchema = new mongoose.Schema({
     },
     operation:{
         type:String,
-        enum:["upload","merge","annotate","convert"],
+        enum:["upload","text-overlay","merge","annotate","convert"],
         required:true,
     },
     expiresAt:{

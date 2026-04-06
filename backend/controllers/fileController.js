@@ -2,6 +2,9 @@ import File from '../models/fileModel.js'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { addTextToPDF } from '../utils/pdfService.js'
+import { escapeRegExp } from 'pdf-lib'
+import { json } from 'stream/consumers'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -111,5 +114,78 @@ const deleteFile = async(req,res)=>{
     }
 }
 
+//adding text overlay
+const addTextOverlay = async(req,res)=>{
+    try{
+        const {id} = req.params;
+        const {elements} = req.body;
+        //validate the i/p
+        if(!Array.isArray(elements) || elements.length===0){
+            console.log("Elements array is required")
+            return res.status(400).json({message:"Elements array is required"})
+        }
+        if(elements.length>100){
+            console.log("Too many elements -> max 100")
+            return res.status(400).json({message:"Too many elementts (max 100)"})
+        }
+        for (const el of elements){
+            if(!el.text || typeof el.text !== "string"){
+                return res.status(400).json({message:"Invalid text element"});
+            }
+            if(!el.position || typeof el.position.x !== "number" || typeof el.position.y !== "number" ){
+                return res.status(400).json({message:"Invalid position"})
+            }
+            if(!el.page !== undefined && el.page <0){
+                return res.status(400).json({message:"Invalid page number"})
+            }
+        }
+        //fetch the file
+        const file = await File.findById(id);
+        if(!file){
+            console.log("File not found");
+            return res.status(404).json({message:"File not found"});
+        }
+        if(file.userId.toString() !== req.user.id){
+            console.log("unauthorized")
+            return res.status(403).json({message:"Unauthorized"})
+        }
+        if(file.fileType !== "pdf"){
+            console.log("Only pdfs are allowed to edit")
+            return res.status(400).json({message:"Only PDFs allowed"})
+        }
+        //file paths
+        const uploadsDir=path.join(__dirname, "..", "uploads");
 
-export {fileUpload, getUserFiles, deleteFile}
+        const inputPath = path.join(uploadsDir, file.storedName);
+        const newFileName = `edited-${Date.now()}-${file.storedName}`;
+        const outputPath = path.join(uploadsDir, newFileName);
+
+        //process the pdf
+        await addTextToPDF({
+            inputPath,
+            outputPath,
+            elements
+        });
+        //save new file record
+        const newFile = await File.create({
+            userId:req.user.id,
+            originalName: file.originalName,
+            storedName: newFileName,
+            fileType: file.fileType,
+            size: file.size,
+            operation:"text-overlay",
+            expiresAt: new Date(Date.now() + 10*24*60*60*1000),
+        });
+        console.log('text overlay applied')
+        return res.status(200).json({
+            message:"Text overlay applied",
+            file: newFile,
+        })
+    }catch(err){
+        console.log("text overlay error",err)
+        return res.status(500).json({message:"Failed to process pdf",err})
+    }
+}
+
+
+export {fileUpload, getUserFiles, deleteFile, addTextOverlay}

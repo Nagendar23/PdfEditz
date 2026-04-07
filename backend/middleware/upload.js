@@ -25,7 +25,13 @@ const storage = multer.diskStorage({
 const allowedMimeTypes =[
     "application/pdf",
     "application/msword" ,///.doc
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document," ///docx
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ///docx
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+
 ];
 
 ///file filtering
@@ -33,7 +39,7 @@ const fileFilter = (req,file,cb)=>{
     if(allowedMimeTypes.includes(file.mimetype)){
         cb(null,true);
     }else{
-        cb(new Error("Only PDF and Word files are allowed"),false);
+        cb(new Error("Only PDF, Word files and images(PNG, JPEG, GIF, WebP) are allowed"),false);
     }
 }
 

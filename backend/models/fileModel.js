@@ -16,7 +16,7 @@ const fileSchema = new mongoose.Schema({
     },
     fileType:{
         type:String,
-        enum:["pdf","doc","docx"],
+        enum:["pdf","doc","docx","image"],
         required:true,
     },
     size:{
@@ -24,7 +24,7 @@ const fileSchema = new mongoose.Schema({
     },
     operation:{
         type:String,
-        enum:["upload","text-overlay","merge","annotate","convert"],
+        enum:["upload","text-overlay","overlay","merge","annotate","convert"],
         required:true,
     },
     expiresAt:{

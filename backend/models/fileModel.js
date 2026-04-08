@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { type } from "os";
 
 const fileSchema = new mongoose.Schema({
     userId:{
@@ -27,6 +28,11 @@ const fileSchema = new mongoose.Schema({
         enum:["upload","text-overlay","overlay","merge","annotate","convert"],
         required:true,
     },
+    // sourceFileIds:{
+    //     type:[mongoose.Schema.Types.ObjectId],
+    //     ref:'File',
+    //     default:[],
+    // },
     expiresAt:{
         type:Date,
         required:true,

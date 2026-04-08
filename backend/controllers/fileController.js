@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { processPDF } from '../utils/pdfService.js'
 import { escapeRegExp } from 'pdf-lib'
 import { json } from 'stream/consumers'
+import { log } from 'console'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -156,31 +157,93 @@ const addOverlay = async (req, res) => {
     const outputPath = path.join(uploadsDir, newFileName);
 
     // ---------------- RESOLVE IMAGE PATHS ----------------
-    for (const el of elements) {
-      if (el.type === "image") {
-        if (!el.imageFileId) {
-          return res.status(400).json({
-            message: "imageFileId required for image",
-          });
-        }
-
-        const imageFile = await File.findById(el.imageFileId);
-
-        if (!imageFile) {
-          return res.status(400).json({
-            message: "Invalid imageFileId",
-          });
-        }
-
-        if (imageFile.userId.toString() !== req.user.id) {
-          return res.status(403).json({
-            message: "Unauthorized image access",
-          });
-        }
-
-        el.imagePath = path.join(uploadsDir, imageFile.storedName);
+for (const el of elements) {
+  if (el.type === "image") {
+    if (!el.imageFileId) {
+      return res.status(400).json({
+        message: "imageFileId required for image",
+      });
+    }
+    
+    // Validate rotation
+    if(el.rotation !== undefined){
+      if(typeof el.rotation !== "number"){
+        return res.status(400).json({message:"Rotation must be a number (degrees)"})
+      }
+      if(el.rotation < 0 || el.rotation > 360){
+        return res.status(400).json({message:"Rotation number must be between 0 and 360"})
       }
     }
+    
+    // Validate opacity
+    if(el.opacity !== undefined){
+      if(typeof el.opacity !== "number"){
+        return res.status(400).json({message:"Opacity must be a number (0-1)"})
+      }
+      if(el.opacity < 0 || el.opacity > 1){
+        return res.status(400).json({message:"Opacity must be between 0 and 1"})
+      }
+    }
+    
+    // ---- VALIDATE & PROCESS 'pages' PARAMETER ----
+    if (el.pages !== undefined) {
+      if (typeof el.pages === "number") {
+        if (el.pages < 0) {
+          return res.status(400).json({
+            message: "Page number must be >= 0"
+          });
+        }
+        el._pageIndices = [el.pages];
+        
+      } else if (Array.isArray(el.pages)) {
+        if (el.pages.length === 0) {
+          return res.status(400).json({
+            message: "Pages array cannot be empty"
+          });
+        }
+        
+        if (el.pages.length === 2 && typeof el.pages[0] === "number" && typeof el.pages[1] === "number") {
+          const [start, end] = el.pages;
+          if (start < 0 || end < 0 || start > end) {
+            return res.status(400).json({
+              message: "Page range: start must be >= 0 and start <= end"
+            });
+          }
+          el._pageIndices = Array.from({length: end - start + 1}, (_, i) => start + i);
+          
+        } else {
+          if (!el.pages.every(p => typeof p === "number" && p >= 0)) {
+            return res.status(400).json({
+              message: "All page numbers must be non-negative integers"
+            });
+          }
+          el._pageIndices = el.pages;
+        }
+        
+      } else {
+        return res.status(400).json({
+          message: "Pages must be a number or array"
+        });
+      }
+    }
+
+    const imageFile = await File.findById(el.imageFileId);
+
+    if (!imageFile) {
+      return res.status(400).json({
+        message: "Invalid imageFileId",
+      });
+    }
+
+    if (imageFile.userId.toString() !== req.user.id) {
+      return res.status(403).json({
+        message: "Unauthorized image access",
+      });
+    }
+
+    el.imagePath = path.join(uploadsDir, imageFile.storedName);
+  }
+}
 
     // ---------------- PROCESS PDF ----------------
     await processPDF({
@@ -199,7 +262,7 @@ const addOverlay = async (req, res) => {
       operation: "overlay",
       expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
     });
-
+    console.log("overlay applied",newFile)
     return res.status(200).json({
       message: "Overlay applied",
       file: newFile,
@@ -207,7 +270,6 @@ const addOverlay = async (req, res) => {
 
   } catch (err) {
     console.error("OVERLAY ERROR:", err);
-
     return res.status(500).json({
       message: "Failed to process PDF",
       error: err.message,

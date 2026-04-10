@@ -28,11 +28,27 @@ const fileSchema = new mongoose.Schema({
         enum:["upload","text-overlay","overlay","merge","annotate","convert"],
         required:true,
     },
-    // sourceFileIds:{
-    //     type:[mongoose.Schema.Types.ObjectId],
-    //     ref:'File',
-    //     default:[],
+
+    // //OPERATIONAL HISTORY
+    // //linking the source filee for tracing history
+    // parentFileId:{
+    //     type:mongoose.Schema.Types.ObjectId,
+    //     ref:"File",
+    //     default:null  //null for original uploads
     // },
+    // //storing exact operation parameters
+    // operationDetails:{
+    //     type:{
+    //         //for the overlay operations
+    //         elements:[{
+    //             type:Object,
+    //         }],
+    //         sourceFileIds:[mongoose.Schema.Types.ObjectId]
+    //     },
+    //     default:null,
+    // },
+
+
     expiresAt:{
         type:Date,
         required:true,

@@ -13,6 +13,10 @@ import cleanUpExpiredFiles from "./utils/cleanup.js";
 const app = express()
 dotenv.config()
 app.use(express.json())
+app.use(cors({
+    origin:'http://localhost:3000',
+    credentials:true,
+}))
 
 app.use("/uploads", express.static("uploads"));
 
@@ -26,9 +30,9 @@ cron.schedule("0 0 * * *",async()=>{
     await cleanUpExpiredFiles()
 })
 
-app.get('/',(req,res)=>{
-    res.send("backend is working")
-})
+// app.get('/',(req,res)=>{
+//     res.send("backend is working")
+// })
 
 app.use('/api/test-upload',testUpload)
 

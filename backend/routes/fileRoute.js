@@ -1,5 +1,5 @@
 import {Router} from 'express'
-import {fileUpload, getUserFiles, deleteFile, addOverlay, pdfMerge} from '../controllers/fileController.js'
+import {fileUpload, getUserFiles, deleteFile, addOverlay, pdfMerge, previewFile} from '../controllers/fileController.js'
 import authMiddleware from '../middleware/authMiddleware.js'
 import upload, { convertImageToJPEG } from '../middleware/upload.js'
 
@@ -15,5 +15,7 @@ fileRouter.delete('/:id',authMiddleware, deleteFile)
 fileRouter.post("/:id/add-overlay",authMiddleware, addOverlay);
 
 fileRouter.post("/merge",authMiddleware,pdfMerge);
+
+fileRouter.get("/:id/preview",authMiddleware, previewFile);
 
 export default fileRouter

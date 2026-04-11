@@ -14,6 +14,8 @@ pnpm dev
 bun dev
 ```
 
+> Note: `npm run dev` is configured to run Next.js with webpack (`next dev --webpack`) for better compatibility on Windows systems that can hit `EPERM` file rename errors with Turbopack.
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.

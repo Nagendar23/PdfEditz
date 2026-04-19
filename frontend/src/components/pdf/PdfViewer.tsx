@@ -22,20 +22,33 @@ interface PageProxyLike {
   getViewport: (params: { scale: number }) => PageDimensions;
 }
 
-interface OverlayPoint{
-    page:number;
-    x:number;
-    y:number;
+interface OverlayText {
+  id: string;
+  type: "text";
+  page: number;
+  x: number;
+  y: number;
+  content: string;
+  style: {
+    fontSize: number;
+    color: string;
+  };
+}
+
+function createOverlayId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export default function PdfViewer({ fileUrl }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
-  const [error, setError] = useState<boolean>(false);
-  const [pageDimensions, setPageDimensions] = useState<
-    Record<number, PageDimensions>
-  >({});
-
-  const [overlays, setOverlays] = useState<OverlayPoint[]>([]);
+  const [error, setError] = useState(false);
+  const [pageDimensions, setPageDimensions] = useState<Record<number, PageDimensions>>({});
+  const [overlays, setOverlays] = useState<OverlayText[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
@@ -46,8 +59,10 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
     console.error("Failed to load PDF:", err);
     setError(true);
   }
+
   function onPageLoadSuccess(pageNumber: number, page: PageProxyLike) {
     const viewport = page.getViewport({ scale: PAGE_SCALE });
+
     setPageDimensions((prev) => {
       const existing = prev[pageNumber];
       if (
@@ -57,6 +72,7 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
       ) {
         return prev;
       }
+
       return {
         ...prev,
         [pageNumber]: {
@@ -68,6 +84,8 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
   }
 
   function onPageClick(pageNumber: number, event: MouseEvent<HTMLDivElement>) {
+    if (draggingId) return;
+
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -78,27 +96,55 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
     const normalizedX = Math.min(Math.max(x / pageWidth, 0), 1);
     const normalizedY = Math.min(Math.max(y / pageHeight, 0), 1);
 
-    const payload:OverlayPoint = {
-      page: pageNumber,
-      x: normalizedX,
-      y: normalizedY,
-    };
+    const newId = createOverlayId();
 
-    setOverlays((prev)=> [...prev, payload]);
-    console.log("Overlay payload:", payload)
+    setOverlays((prev) => [
+      ...prev,
+      {
+        id: newId,
+        type: "text",
+        page: pageNumber,
+        x: normalizedX,
+        y: normalizedY,
+        content: "Text",
+        style: {
+          fontSize: 16,
+          color: "red",
+        },
+      },
+    ]);
 
-    console.log("Raw click (px):", {
-      page: pageNumber,
-      rawX: x,
-      rawY: y,
-    });
+    setActiveId(newId);
+  }
 
-    console.log("Raw click:", { page: pageNumber, x, y });
-    console.log({
-      page: pageNumber,
-      normalizedX,
-      normalizedY,
-    });
+  function updateOverlayContent(id: string, content: string) {
+    setOverlays((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, content } : item))
+    );
+  }
+
+  function onPageMouseMove(pageNumber: number, event: MouseEvent<HTMLDivElement>) {
+    if (!draggingId) return;
+
+    const draggingOverlay = overlays.find((o) => o.id === draggingId);
+    if (!draggingOverlay || draggingOverlay.page !== pageNumber) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const normalizedX = Math.min(Math.max(x / rect.width, 0), 1);
+    const normalizedY = Math.min(Math.max(y / rect.height, 0), 1);
+
+    setOverlays((prev) =>
+      prev.map((item) =>
+        item.id === draggingId ? { ...item, x: normalizedX, y: normalizedY } : item
+      )
+    );
+  }
+
+  function stopDragging() {
+    setDraggingId(null);
   }
 
   if (error) {
@@ -114,16 +160,20 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
       >
         {Array.from({ length: numPages }, (_, index) => {
           const pageNumber = index + 1;
-          const pageOverlays = overlays.filter((o)=> o.page === pageNumber);
+          const pageOverlays = overlays.filter((o) => o.page === pageNumber);
+
           return (
             <div
               key={pageNumber}
               onClick={(event) => onPageClick(pageNumber, event)}
+              onMouseMove={(event) => onPageMouseMove(pageNumber, event)}
+              onMouseUp={stopDragging}
+              onMouseLeave={stopDragging}
               style={{
                 position: "relative",
                 width: "fit-content",
-                cursor: "crosshair",
-                marginBottom:"12px",
+                cursor: draggingId ? "grabbing" : "crosshair",
+                marginBottom: "12px",
               }}
             >
               <Page
@@ -135,45 +185,63 @@ export default function PdfViewer({ fileUrl }: PdfViewerProps) {
                   onPageLoadSuccess(pageNumber, page as PageProxyLike)
                 }
               />
-              <div
-              style={{
-                position:"absolute",
-                inset:0,
-                pointerEvents:"none",
-                zIndex:20,
-              }}
-              >
-                {
-                    pageOverlays.map((o,i)=>(
-                        <div
-                            key={String(pageNumber)+ "-" + String(i)}
-                            style={{
-                                position:"absolute",
-                                left:(o.x *100).toFixed(4) + "%",
-                                top:(o.y *100).toFixed(4) + "%",
-                                transform:"translate(-50%, -50%)",
-                                background:"red",
-                                width:"10px",
-                                height:"10px",
-                                borderRadius:"50%",
-                            }}
-                        />
 
-                    ))
-                }
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 20,
+                }}
+              >
+                {pageOverlays.map((o) => (
+                  <div
+                    key={o.id}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      if (activeId === o.id) return;
+                      setDraggingId(o.id);
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!draggingId) setActiveId(o.id);
+                    }}
+                    style={{
+                      position: "absolute",
+                      left: `${o.x * 100}%`,
+                      top: `${o.y * 100}%`,
+                      transform: "translate(-50%, -50%)",
+                      color: o.style.color,
+                      fontSize: `${o.style.fontSize}px`,
+                      cursor: activeId === o.id ? "text" : "move",
+                      whiteSpace: "nowrap",
+                      userSelect: "none",
+                    }}
+                  >
+                    {o.id === activeId ? (
+                      <input
+                        value={o.content}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => updateOverlayContent(o.id, e.target.value)}
+                        onBlur={() => setActiveId(null)}
+                        style={{
+                          fontSize: `${o.style.fontSize}px`,
+                          color: o.style.color,
+                          border: "1px solid #ccc",
+                          padding: "2px 4px",
+                          minWidth: "60px",
+                          userSelect: "text",
+                        }}
+                      />
+                    ) : (
+                      <span>{o.content}</span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           );
         })}
-        {/* 
-                {numPages && Array.from(new Array(numPages), (el, index) => (
-                    <Page 
-                        key={`page_${index + 1}`} 
-                        pageNumber={index + 1} 
-                        renderTextLayer={false} 
-                        renderAnnotationLayer={false} 
-                    />
-                ))} */}
       </Document>
     </div>
   );

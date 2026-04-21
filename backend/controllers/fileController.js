@@ -133,7 +133,6 @@ const addOverlay = async (req, res) => {
     const { id } = req.params;
     const { elements } = req.body;
 
-    // ---------------- VALIDATION ----------------
     if (!Array.isArray(elements) || elements.length === 0) {
       return res.status(400).json({ message: "Elements required" });
     }
@@ -142,27 +141,59 @@ const addOverlay = async (req, res) => {
       return res.status(400).json({ message: "Too many elements" });
     }
 
-    // ---------------- GET FILE ----------------
     const file = await File.findById(id);
-
     if (!file) return res.status(404).json({ message: "File not found" });
 
-    if (file.userId.toString() !== req.user.id) {
+    const userId = req.user._id || req.user.id;
+
+    if (String(file.userId) !== String(userId)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     if (file.fileType !== "pdf") {
-      console.log("only pdfs allowed");
       return res.status(400).json({ message: "Only PDFs allowed" });
     }
 
     const uploadsDir = path.join(__dirname, "..", "uploads");
-
     const inputPath = path.join(uploadsDir, file.storedName);
-    const newFileName = `edited-${Date.now()}-${file.storedName}`;
+
+    const extFromName = path.extname(file.originalName);
+    const ext = extFromName || ".pdf";
+    const rawBase = path.basename(file.originalName, ext);
+    const rootBase = rawBase.replace(/-edited\d+$/i, "");
+
+    const escapeRegex = (value) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const nameRegex = new RegExp(
+      "^" + escapeRegex(rootBase) + "-edited(\\d+)" + escapeRegex(ext) + "$",
+      "i"
+    );
+
+    const existingEditedFiles = await File.find(
+      {
+        userId: userId,
+        originalName: { $regex: nameRegex },
+      },
+      { originalName: 1 }
+    ).lean();
+
+    const maxEditedNumber = existingEditedFiles.reduce((max, item) => {
+      const match = item.originalName.match(nameRegex);
+      const num = match ? Number(match[1]) : 0;
+      if (!Number.isFinite(num)) return max;
+      return Math.max(max, num);
+    }, 0);
+
+    const nextEditedNumber = maxEditedNumber + 1;
+    const displayName = rootBase + "-edited" + nextEditedNumber + ext;
+
+    const uniquePrefix =
+      String(Date.now()) + "-" + String(Math.round(Math.random() * 1e9));
+
+    const newFileName = uniquePrefix + "-" + displayName;
     const outputPath = path.join(uploadsDir, newFileName);
 
-    // ---------------- RESOLVE IMAGE PATHS ----------------
     for (const el of elements) {
       if (el.type === "image") {
         if (!el.imageFileId) {
@@ -171,7 +202,6 @@ const addOverlay = async (req, res) => {
           });
         }
 
-        // Validate rotation
         if (el.rotation !== undefined) {
           if (typeof el.rotation !== "number") {
             return res
@@ -185,7 +215,6 @@ const addOverlay = async (req, res) => {
           }
         }
 
-        // Validate opacity
         if (el.opacity !== undefined) {
           if (typeof el.opacity !== "number") {
             return res
@@ -199,7 +228,6 @@ const addOverlay = async (req, res) => {
           }
         }
 
-        // ---- VALIDATE & PROCESS 'pages' PARAMETER ----
         if (el.pages !== undefined) {
           if (typeof el.pages === "number") {
             if (el.pages < 0) {
@@ -228,7 +256,7 @@ const addOverlay = async (req, res) => {
               }
               el._pageIndices = Array.from(
                 { length: end - start + 1 },
-                (_, i) => start + i,
+                (_, i) => start + i
               );
             } else {
               if (!el.pages.every((p) => typeof p === "number" && p >= 0)) {
@@ -253,7 +281,7 @@ const addOverlay = async (req, res) => {
           });
         }
 
-        if (imageFile.userId.toString() !== req.user.id) {
+        if (String(imageFile.userId) !== String(userId)) {
           return res.status(403).json({
             message: "Unauthorized image access",
           });
@@ -263,24 +291,24 @@ const addOverlay = async (req, res) => {
       }
     }
 
-    // ---------------- PROCESS PDF ----------------
     await processPDF({
       inputPath,
       outputPath,
       elements,
     });
 
-    // ---------------- SAVE NEW FILE ----------------
+    const stats = fs.statSync(outputPath);
+
     const newFile = await File.create({
-      userId: req.user.id,
-      originalName: file.originalName,
+      userId: userId,
+      originalName: displayName,
       storedName: newFileName,
       fileType: file.fileType,
-      size: file.size,
+      size: stats.size,
       operation: "overlay",
       expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
     });
-    console.log("overlay applied", newFile);
+
     return res.status(200).json({
       message: "Overlay applied",
       file: newFile,

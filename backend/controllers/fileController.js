@@ -133,7 +133,6 @@ const addOverlay = async (req, res) => {
     const { id } = req.params;
     const { elements } = req.body;
 
-    // ---------------- VALIDATION ----------------
     if (!Array.isArray(elements) || elements.length === 0) {
       return res.status(400).json({ message: "Elements required" });
     }
@@ -142,27 +141,59 @@ const addOverlay = async (req, res) => {
       return res.status(400).json({ message: "Too many elements" });
     }
 
-    // ---------------- GET FILE ----------------
     const file = await File.findById(id);
-
     if (!file) return res.status(404).json({ message: "File not found" });
 
-    if (file.userId.toString() !== req.user.id) {
+    const userId = req.user._id || req.user.id;
+
+    if (String(file.userId) !== String(userId)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     if (file.fileType !== "pdf") {
-      console.log("only pdfs allowed");
       return res.status(400).json({ message: "Only PDFs allowed" });
     }
 
     const uploadsDir = path.join(__dirname, "..", "uploads");
-
     const inputPath = path.join(uploadsDir, file.storedName);
-    const newFileName = `edited-${Date.now()}-${file.storedName}`;
+
+    const extFromName = path.extname(file.originalName);
+    const ext = extFromName || ".pdf";
+    const rawBase = path.basename(file.originalName, ext);
+    const rootBase = rawBase.replace(/-edited\d+$/i, "");
+
+    const escapeRegex = (value) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const nameRegex = new RegExp(
+      "^" + escapeRegex(rootBase) + "-edited(\\d+)" + escapeRegex(ext) + "$",
+      "i"
+    );
+
+    const existingEditedFiles = await File.find(
+      {
+        userId: userId,
+        originalName: { $regex: nameRegex },
+      },
+      { originalName: 1 }
+    ).lean();
+
+    const maxEditedNumber = existingEditedFiles.reduce((max, item) => {
+      const match = item.originalName.match(nameRegex);
+      const num = match ? Number(match[1]) : 0;
+      if (!Number.isFinite(num)) return max;
+      return Math.max(max, num);
+    }, 0);
+
+    const nextEditedNumber = maxEditedNumber + 1;
+    const displayName = rootBase + "-edited" + nextEditedNumber + ext;
+
+    const uniquePrefix =
+      String(Date.now()) + "-" + String(Math.round(Math.random() * 1e9));
+
+    const newFileName = uniquePrefix + "-" + displayName;
     const outputPath = path.join(uploadsDir, newFileName);
 
-    // ---------------- RESOLVE IMAGE PATHS ----------------
     for (const el of elements) {
       if (el.type === "image") {
         if (!el.imageFileId) {
@@ -171,7 +202,6 @@ const addOverlay = async (req, res) => {
           });
         }
 
-        // Validate rotation
         if (el.rotation !== undefined) {
           if (typeof el.rotation !== "number") {
             return res
@@ -185,7 +215,6 @@ const addOverlay = async (req, res) => {
           }
         }
 
-        // Validate opacity
         if (el.opacity !== undefined) {
           if (typeof el.opacity !== "number") {
             return res
@@ -199,7 +228,6 @@ const addOverlay = async (req, res) => {
           }
         }
 
-        // ---- VALIDATE & PROCESS 'pages' PARAMETER ----
         if (el.pages !== undefined) {
           if (typeof el.pages === "number") {
             if (el.pages < 0) {
@@ -228,7 +256,7 @@ const addOverlay = async (req, res) => {
               }
               el._pageIndices = Array.from(
                 { length: end - start + 1 },
-                (_, i) => start + i,
+                (_, i) => start + i
               );
             } else {
               if (!el.pages.every((p) => typeof p === "number" && p >= 0)) {
@@ -253,7 +281,7 @@ const addOverlay = async (req, res) => {
           });
         }
 
-        if (imageFile.userId.toString() !== req.user.id) {
+        if (String(imageFile.userId) !== String(userId)) {
           return res.status(403).json({
             message: "Unauthorized image access",
           });
@@ -263,24 +291,24 @@ const addOverlay = async (req, res) => {
       }
     }
 
-    // ---------------- PROCESS PDF ----------------
     await processPDF({
       inputPath,
       outputPath,
       elements,
     });
 
-    // ---------------- SAVE NEW FILE ----------------
+    const stats = fs.statSync(outputPath);
+
     const newFile = await File.create({
-      userId: req.user.id,
-      originalName: file.originalName,
+      userId: userId,
+      originalName: displayName,
       storedName: newFileName,
       fileType: file.fileType,
-      size: file.size,
+      size: stats.size,
       operation: "overlay",
       expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
     });
-    console.log("overlay applied", newFile);
+
     return res.status(200).json({
       message: "Overlay applied",
       file: newFile,
@@ -295,7 +323,7 @@ const addOverlay = async (req, res) => {
 };
 
 /// Merging PDF's
-const pdfMerge = async(req, res) => {
+const pdfMerge = async (req, res) => {
   try {
     console.log("=== Starting PDF Merge ===");
     let { fileIds } = req.body;
@@ -304,23 +332,29 @@ const pdfMerge = async(req, res) => {
     // -------- VALIDATION --------
     if (!Array.isArray(fileIds) || fileIds.length === 0) {
       console.log("FileIds must be a non-empty array");
-      return res.status(400).json({ message: "fileIds must be a non-empty array" });
+      return res
+        .status(400)
+        .json({ message: "fileIds must be a non-empty array" });
     }
 
     if (fileIds.length < 2) {
       console.log("Requires at least 2 files to merge");
-      return res.status(400).json({ message: "At least 2 files required to merge" });
+      return res
+        .status(400)
+        .json({ message: "At least 2 files required to merge" });
     }
 
     if (fileIds.length > 10) {
       console.log("Cannot merge more than 10 files");
-      return res.status(400).json({ message: "Cannot merge more than 10 files" });
+      return res
+        .status(400)
+        .json({ message: "Cannot merge more than 10 files" });
     }
 
     // ✅ CONVERT STRING IDS TO OBJECTID
     try {
-      fileIds = fileIds.map(id => {
-        if (typeof id === 'string') {
+      fileIds = fileIds.map((id) => {
+        if (typeof id === "string") {
           if (!mongoose.Types.ObjectId.isValid(id)) {
             throw new Error(`Invalid ObjectId: ${id}`);
           }
@@ -331,7 +365,9 @@ const pdfMerge = async(req, res) => {
       console.log("Converted fileIds to ObjectIds:", fileIds);
     } catch (err) {
       console.error("Error converting fileIds:", err.message);
-      return res.status(400).json({ message: `Invalid file ID format: ${err.message}` });
+      return res
+        .status(400)
+        .json({ message: `Invalid file ID format: ${err.message}` });
     }
 
     // -------- FETCH & VALIDATE FILES --------
@@ -340,7 +376,7 @@ const pdfMerge = async(req, res) => {
       try {
         console.log(`Fetching file: ${fileId}`);
         const file = await File.findById(fileId);
-        
+
         console.log(`File fetch result:`, file);
 
         if (!file) {
@@ -352,28 +388,35 @@ const pdfMerge = async(req, res) => {
 
         // Check ownership
         if (String(file.userId) !== String(req.user._id)) {
-          console.log(`Unauthorized: file.userId=${file.userId}, req.user._id=${req.user._id}`);
-          return res.status(403).json({ message: `Unauthorized to access file ${fileId}` });
+          console.log(
+            `Unauthorized: file.userId=${file.userId}, req.user._id=${req.user._id}`,
+          );
+          return res
+            .status(403)
+            .json({ message: `Unauthorized to access file ${fileId}` });
         }
 
         // Check if PDF
         if (file.fileType !== "pdf") {
           console.log(`File ${fileId} is not a PDF, type: ${file.fileType}`);
-          return res.status(400).json({ message: `File ${fileId} is not a PDF` });
+          return res
+            .status(400)
+            .json({ message: `File ${fileId} is not a PDF` });
         }
 
         // Check if exists on disk
         const filePath = path.join(__dirname, "..", "uploads", file.storedName);
         console.log(`Checking disk path: ${filePath}`);
-        
+
         if (!fs.existsSync(filePath)) {
           console.log(`File ${fileId} not found on disk at ${filePath}`);
-          return res.status(404).json({ message: `File ${fileId} not found on disk` });
+          return res
+            .status(404)
+            .json({ message: `File ${fileId} not found on disk` });
         }
 
         console.log(`File ${fileId} validated successfully`);
         files.push({ ...file.toObject(), filePath });
-
       } catch (err) {
         console.error(`Error fetching file ${fileId}:`, err.message);
         throw err;
@@ -384,7 +427,7 @@ const pdfMerge = async(req, res) => {
 
     // -------- MERGE PDFs --------
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument } = await import("pdf-lib");
       const mergedPdf = await PDFDocument.create();
 
       for (const file of files) {
@@ -397,7 +440,7 @@ const pdfMerge = async(req, res) => {
         } catch (err) {
           console.error(`Error processing file ${file._id}:`, err.message);
           return res.status(400).json({
-            message: `Error processing file ${file._id}: ${err.message}`
+            message: `Error processing file ${file._id}: ${err.message}`,
           });
         }
       }
@@ -439,12 +482,10 @@ const pdfMerge = async(req, res) => {
         message: "PDFs merged successfully",
         file: mergedFile,
       });
-
     } catch (mergeErr) {
       console.error("Error during merge process:", mergeErr.message);
       throw mergeErr;
     }
-
   } catch (err) {
     console.error("=== Error while merging PDFs ===");
     console.error("Error message:", err.message);
@@ -456,4 +497,53 @@ const pdfMerge = async(req, res) => {
   }
 };
 
-export { fileUpload, getUserFiles, deleteFile, addOverlay, pdfMerge };
+const previewFile = async (req, res) => {
+  try {
+    const fileId = req.params.id;
+    const file = await File.findById(fileId);
+    if (!file) {
+      console.log("File not found");
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    if (String(file.userId) !== String(req.user._id)) {
+      console.log("Not authenticated to perform this action");
+      return res.status(403).json({ message: "Not authenticated " });
+    }
+
+    const filePath = path.join(__dirname, "..", "uploads", file.storedName);
+    if (!fs.existsSync(filePath)) {
+      console.log("File missing in disk");
+      return res.status(404).json({ message: "File missing on disk" });
+    }
+
+    //map file types to mime types
+    const mimeTypes = {
+      pdf: "application/pdf",
+      doc: "application/msword",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      image: "image/jpeg",
+    };
+    
+    //set for inline viewing
+    res.set("Content-Type", mimeTypes[file.fileType] || "application/octet-stream" );
+    res.set("Content-Disposition", "inline");
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (err) {
+    console.log("Error while previewing file ", err);
+    return res
+      .status(500)
+      .json({ message: "Error while previewing file :", err });
+  }
+};
+
+export {
+  fileUpload,
+  getUserFiles,
+  deleteFile,
+  addOverlay,
+  pdfMerge,
+  previewFile,
+};

@@ -56,7 +56,7 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
 
   // Empirical correction for reported left/down drift.
   const HORIZONTAL_NUDGE_PER_FONT_SIZE = 0.08; // move right
-  const VERTICAL_NUDGE_PER_FONT_SIZE = 0.26;   // move up
+  const VERTICAL_NUDGE_PER_FONT_SIZE = 0.13; // move up
 
   for (const el of elements) {
     let pageIndices = [];
@@ -91,7 +91,13 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
           continue;
         }
 
-        const fontSize = Math.max(1, toFiniteNumber(el.style?.fontSize, 20));
+        const uiFontSize = Math.max(1, toFiniteNumber(el.style?.fontSize, 20));
+        const previewScale = Math.max(
+          0.1,
+          toFiniteNumber(el.style?.previewScale, 1)
+        );
+        const fontSize = uiFontSize / previewScale;
+
         const textWidth = font.widthOfTextAtSize(text, fontSize);
         const textHeight = font.heightAtSize(fontSize);
         const align = el.style?.align ?? "center";

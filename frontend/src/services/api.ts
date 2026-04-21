@@ -39,6 +39,7 @@ export interface OverlayRequestPayload{
             fontSize:number;
             color:string;
             align?:"left" | "center" | "right";
+            previewScale?: number;
         }
     }>
 }

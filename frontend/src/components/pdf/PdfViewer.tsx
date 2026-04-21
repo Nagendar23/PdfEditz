@@ -56,6 +56,7 @@ function buildPayload(overlays: OverlayText[]): OverlayRequestPayload {
           fontSize: o.style.fontSize,
           color: o.style.color,
           align: "center",
+          previewScale: PAGE_SCALE,
         },
       })),
   };
@@ -92,7 +93,6 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    // Single source of truth for normalization: DOM rect.
     const normalizedX = Math.min(Math.max(x / rect.width, 0), 1);
     const normalizedY = Math.min(Math.max(y / rect.height, 0), 1);
 

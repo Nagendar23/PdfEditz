@@ -22,6 +22,8 @@ interface OverlayText {
   x: number;
   y: number;
   content: string;
+  rotation: number;
+  opacity: number;
   style: {
     fontSize: number;
     color: string;
@@ -50,8 +52,8 @@ function buildPayload(overlays: OverlayText[]): OverlayRequestPayload {
           x: o.x,
           y: o.y,
         },
-        rotation: 0,
-        opacity: 1,
+        rotation: o.rotation,
+        opacity: o.opacity,
         style: {
           fontSize: o.style.fontSize,
           color: o.style.color,
@@ -107,6 +109,8 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
         x: normalizedX,
         y: normalizedY,
         content: "Text",
+        rotation: 0,
+        opacity: 1,
         style: {
           fontSize: 16,
           color: "#ff0000",
@@ -160,7 +164,9 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
     setOverlays((prev) =>
       prev.map((item) =>
-        item.id === draggingId ? { ...item, x: normalizedX, y: normalizedY } : item
+        item.id === draggingId
+          ? { ...item, x: normalizedX, y: normalizedY }
+          : item
       )
     );
   }
@@ -235,6 +241,47 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             onChange={(e) => {
               if (!activeId) return;
               updateActiveOverlayStyle({ color: e.target.value });
+            }}
+          />
+        </label>
+
+        <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          Rotation:
+          <input
+            type="number"
+            value={activeOverlay?.rotation ?? 0}
+            disabled={!activeId}
+            onChange={(e) => {
+              if (!activeId) return;
+              const rotation = Number(e.target.value);
+              if (Number.isNaN(rotation)) return;
+              setOverlays((prev) =>
+                prev.map((item) =>
+                  item.id === activeId ? { ...item, rotation } : item
+                )
+              );
+            }}
+            style={{ width: "80px" }}
+          />
+        </label>
+
+        <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          Opacity:
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.1}
+            value={activeOverlay?.opacity ?? 1}
+            disabled={!activeId}
+            onChange={(e) => {
+              if (!activeId) return;
+              const opacity = Number(e.target.value);
+              setOverlays((prev) =>
+                prev.map((item) =>
+                  item.id === activeId ? { ...item, opacity } : item
+                )
+              );
             }}
           />
         </label>
@@ -328,9 +375,11 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                       position: "absolute",
                       left: String(o.x * 100) + "%",
                       top: String(o.y * 100) + "%",
-                      transform: "translate(-50%, -50%)",
+                      transform:
+                        "translate(-50%, -50%) rotate(" + o.rotation + "deg)",
                       color: o.style.color,
                       fontSize: String(o.style.fontSize) + "px",
+                      opacity: o.opacity,
                       fontFamily: "Times New Roman, Times, serif",
                       lineHeight: "1",
                       cursor: editingId === o.id ? "text" : "move",

@@ -195,37 +195,37 @@ const addOverlay = async (req, res) => {
     const outputPath = path.join(uploadsDir, newFileName);
 
     for (const el of elements) {
+      if (el.rotation !== undefined) {
+        if (typeof el.rotation !== "number") {
+          return res
+            .status(400)
+            .json({ message: "Rotation must be a number (degrees)" });
+        }
+        if (el.rotation < 0 || el.rotation > 360) {
+          return res
+            .status(400)
+            .json({ message: "Rotation number must be between 0 and 360" });
+        }
+      }
+
+      if (el.opacity !== undefined) {
+        if (typeof el.opacity !== "number") {
+          return res
+            .status(400)
+            .json({ message: "Opacity must be a number (0-1)" });
+        }
+        if (el.opacity < 0 || el.opacity > 1) {
+          return res
+            .status(400)
+            .json({ message: "Opacity must be between 0 and 1" });
+        }
+      }
+
       if (el.type === "image") {
         if (!el.imageFileId) {
           return res.status(400).json({
             message: "imageFileId required for image",
           });
-        }
-
-        if (el.rotation !== undefined) {
-          if (typeof el.rotation !== "number") {
-            return res
-              .status(400)
-              .json({ message: "Rotation must be a number (degrees)" });
-          }
-          if (el.rotation < 0 || el.rotation > 360) {
-            return res
-              .status(400)
-              .json({ message: "Rotation number must be between 0 and 360" });
-          }
-        }
-
-        if (el.opacity !== undefined) {
-          if (typeof el.opacity !== "number") {
-            return res
-              .status(400)
-              .json({ message: "Opacity must be a number (0-1)" });
-          }
-          if (el.opacity < 0 || el.opacity > 1) {
-            return res
-              .status(400)
-              .json({ message: "Opacity must be between 0 and 1" });
-          }
         }
 
         if (el.pages !== undefined) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentProps, type MouseEvent } from "react";
+import { useState, useEffect, type ComponentProps, type MouseEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { applyOverlay, type OverlayRequestPayload } from "@/services/api";
 
@@ -71,12 +71,53 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-
   const [isApplying, setIsApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
+  const [isOverlayHydrated, setIsOverlayHydrated] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
 
   const activeOverlay = overlays.find((item) => item.id === activeId) ?? null;
+
+  useEffect(() => {
+    if (!fileId) return;
+
+    setIsOverlayHydrated(false);
+    setActiveId(null);
+    setEditingId(null);
+    setDraggingId(null);
+
+    const storageKey = "overlays_" + fileId;
+    const saved = localStorage.getItem(storageKey);
+
+    if (!saved) {
+      setOverlays([]);
+      setIsOverlayHydrated(true);
+      return;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(saved);
+
+      if (Array.isArray(parsed)) {
+        setOverlays(parsed as OverlayText[]);
+      } else {
+        console.error("Invalid overlay data");
+        setOverlays([]);
+      }
+    } catch {
+      console.error("Invalid overlay data");
+      setOverlays([]);
+    } finally {
+      setIsOverlayHydrated(true);
+    }
+  }, [fileId]);
+
+  useEffect(() => {
+    if (!fileId || !isOverlayHydrated) return;
+
+    const storageKey = "overlays_" + fileId;
+    localStorage.setItem(storageKey, JSON.stringify(overlays));
+  }, [overlays, fileId, isOverlayHydrated]);
 
   function clearSelection() {
     setActiveId(null);

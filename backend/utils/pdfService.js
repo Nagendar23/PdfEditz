@@ -57,6 +57,7 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
   // Empirical correction for reported left/down drift.
   const HORIZONTAL_NUDGE_PER_FONT_SIZE = 0.08; // move right
   const VERTICAL_NUDGE_PER_FONT_SIZE = 0.13; // move up
+  const NUDGE_BLEND = 0.5; // 0 = old(local), 1 = new(rotated), 0.5 = midpoint
 
   for (const el of elements) {
     let pageIndices = [];
@@ -102,19 +103,50 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
         const textHeight = font.heightAtSize(fontSize);
         const align = el.style?.align ?? "center";
 
-        let drawX = x;
-        if (align === "center") {
-          drawX = x - textWidth / 2;
+        const color = parseHexColor(el.style?.color);
+        const rotationInput = toFiniteNumber(el.rotation, 0);
+
+        // Keep backend direction aligned with frontend visual direction.
+        const rotation = -rotationInput;
+        const opacity = toFiniteNumber(el.opacity, 1);
+
+        const rad = (rotation * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+
+        // Convert anchor x to a center anchor.
+        let centerX = x;
+        if (align === "left") {
+          centerX = x + textWidth / 2;
         } else if (align === "right") {
-          drawX = x - textWidth;
+          centerX = x - textWidth / 2;
         }
 
-        let drawY = y - textHeight / 2;
+        let centerY = y;
 
-        drawX += fontSize * HORIZONTAL_NUDGE_PER_FONT_SIZE;
-        drawY += fontSize * VERTICAL_NUDGE_PER_FONT_SIZE;
+        // Blend old and new nudge behavior for a middle-ground vertical offset.
+        const localNudgeX = fontSize * HORIZONTAL_NUDGE_PER_FONT_SIZE;
+        const localNudgeY = fontSize * VERTICAL_NUDGE_PER_FONT_SIZE;
 
-        const color = parseHexColor(el.style?.color);
+        const rotatedNudgeX = localNudgeX * cos - localNudgeY * sin;
+        const rotatedNudgeY = localNudgeX * sin + localNudgeY * cos;
+
+        const blendedNudgeX =
+          localNudgeX * (1 - NUDGE_BLEND) + rotatedNudgeX * NUDGE_BLEND;
+        const blendedNudgeY =
+          localNudgeY * (1 - NUDGE_BLEND) + rotatedNudgeY * NUDGE_BLEND;
+
+        centerX += blendedNudgeX;
+        centerY += blendedNudgeY;
+
+        const halfW = textWidth / 2;
+        const halfH = textHeight / 2;
+
+        const rotatedOffsetX = halfW * cos - halfH * sin;
+        const rotatedOffsetY = halfW * sin + halfH * cos;
+
+        const drawX = centerX - rotatedOffsetX;
+        const drawY = centerY - rotatedOffsetY;
 
         page.drawText(text, {
           x: drawX,
@@ -122,6 +154,8 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
           size: fontSize,
           font,
           color,
+          rotate: degrees(rotation),
+          opacity,
         });
       }
 
@@ -141,7 +175,7 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
 
         const imgWidth = toFiniteNumber(el.size?.width, 100);
         const imgHeight = toFiniteNumber(el.size?.height, 100);
-        const rotation = toFiniteNumber(el.rotation, 0);
+        const rotation = -toFiniteNumber(el.rotation, 0);
         const opacity = toFiniteNumber(el.opacity, 1);
 
         page.drawImage(image, {

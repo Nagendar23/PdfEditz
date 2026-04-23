@@ -1,7 +1,7 @@
 import { getToken } from "@/utils/auth";
 // import { type } from 'os';
 
-const BASE_URL = "http://localhost:8000/api";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 export async function getFiles(){
     try{

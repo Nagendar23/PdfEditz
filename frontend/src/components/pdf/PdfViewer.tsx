@@ -3,6 +3,8 @@
 import { useState, useEffect, type ComponentProps, type MouseEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { applyOverlay, type OverlayRequestPayload } from "@/services/api";
+import { getDownloadUrl, getFilePreviewUrl } from "@/services/fileService";
+import { getToken } from "@/utils/auth";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
@@ -28,6 +30,21 @@ interface OverlayText {
     fontSize: number;
     color: string;
   };
+}
+
+interface OverlayHistoryState {
+  past: OverlayText[][];
+  present: OverlayText[];
+  future: OverlayText[][];
+}
+
+type OverlayUpdate = OverlayText[] | ((current: OverlayText[]) => OverlayText[]);
+
+interface DragPreviewState {
+  id: string;
+  page: number;
+  x: number;
+  y: number;
 }
 
 function createOverlayId() {
@@ -67,30 +84,106 @@ function buildPayload(overlays: OverlayText[]): OverlayRequestPayload {
 export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [error, setError] = useState(false);
-  const [overlays, setOverlays] = useState<OverlayText[]>([]);
+  const [currentFileId, setCurrentFileId] = useState(fileId);
+
+  const [history, setHistory] = useState<OverlayHistoryState>({
+    past: [],
+    present: [],
+    future: [],
+  });
+
+  const overlays = history.present;
+
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
+
   const [isApplying, setIsApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
-  const [isOverlayHydrated, setIsOverlayHydrated] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
 
+  const [isOverlayHydrated, setIsOverlayHydrated] = useState(false);
+
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+
   const activeOverlay = overlays.find((item) => item.id === activeId) ?? null;
+
+  function clearSelection() {
+    setActiveId(null);
+    setEditingId(null);
+    setDraggingId(null);
+    setDragPreview(null);
+  }
+
+  function updateOverlays(next: OverlayUpdate) {
+    setHistory((prev) => {
+      const newPresent =
+        typeof next === "function"
+          ? (next as (current: OverlayText[]) => OverlayText[])(prev.present)
+          : next;
+
+      if (newPresent === prev.present) {
+        return prev;
+      }
+
+      return {
+        past: [...prev.past, prev.present],
+        present: newPresent,
+        future: [],
+      };
+    });
+  }
+
+  function undo() {
+    clearSelection();
+
+    setHistory((prev) => {
+      if (prev.past.length === 0) return prev;
+
+      const previous = prev.past[prev.past.length - 1];
+
+      return {
+        past: prev.past.slice(0, -1),
+        present: previous,
+        future: [prev.present, ...prev.future],
+      };
+    });
+  }
+
+  function redo() {
+    clearSelection();
+
+    setHistory((prev) => {
+      if (prev.future.length === 0) return prev;
+
+      const next = prev.future[0];
+
+      return {
+        past: [...prev.past, prev.present],
+        present: next,
+        future: prev.future.slice(1),
+      };
+    });
+  }
 
   useEffect(() => {
     if (!fileId) return;
 
+    setCurrentFileId(fileId);
     setIsOverlayHydrated(false);
-    setActiveId(null);
-    setEditingId(null);
-    setDraggingId(null);
+    clearSelection();
 
     const storageKey = "overlays_" + fileId;
     const saved = localStorage.getItem(storageKey);
 
     if (!saved) {
-      setOverlays([]);
+      setHistory({
+        past: [],
+        present: [],
+        future: [],
+      });
       setIsOverlayHydrated(true);
       return;
     }
@@ -99,14 +192,26 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       const parsed: unknown = JSON.parse(saved);
 
       if (Array.isArray(parsed)) {
-        setOverlays(parsed as OverlayText[]);
+        setHistory({
+          past: [],
+          present: parsed as OverlayText[],
+          future: [],
+        });
       } else {
         console.error("Invalid overlay data");
-        setOverlays([]);
+        setHistory({
+          past: [],
+          present: [],
+          future: [],
+        });
       }
     } catch {
       console.error("Invalid overlay data");
-      setOverlays([]);
+      setHistory({
+        past: [],
+        present: [],
+        future: [],
+      });
     } finally {
       setIsOverlayHydrated(true);
     }
@@ -119,20 +224,21 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     localStorage.setItem(storageKey, JSON.stringify(overlays));
   }, [overlays, fileId, isOverlayHydrated]);
 
-  function clearSelection() {
-    setActiveId(null);
-    setEditingId(null);
-    setDraggingId(null);
-  }
-
   function handleSelectOverlay(id: string) {
+    setDraggingId(null);
+    setDragPreview(null);
+
+    if (activeId === id) {
+      setEditingId(id);
+      return;
+    }
+
     setActiveId(id);
     setEditingId(null);
-    setDraggingId(null);
   }
 
   function removeOverlayById(id: string) {
-    setOverlays((prev) => prev.filter((item) => item.id !== id));
+    updateOverlays((prev) => prev.filter((item) => item.id !== id));
 
     if (activeId === id) {
       setActiveId(null);
@@ -142,6 +248,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     }
     if (draggingId === id) {
       setDraggingId(null);
+      setDragPreview(null);
     }
   }
 
@@ -173,7 +280,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
     const newId = createOverlayId();
 
-    setOverlays((prev) => [
+    updateOverlays((prev) => [
       ...prev,
       {
         id: newId,
@@ -209,7 +316,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   }
 
   function updateOverlayContent(id: string, content: string) {
-    setOverlays((prev) =>
+    updateOverlays((prev) =>
       prev.map((item) => (item.id === id ? { ...item, content } : item))
     );
   }
@@ -217,7 +324,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   function updateActiveOverlayStyle(stylePatch: Partial<OverlayText["style"]>) {
     if (!activeId) return;
 
-    setOverlays((prev) =>
+    updateOverlays((prev) =>
       prev.map((item) =>
         item.id === activeId
           ? {
@@ -248,17 +355,74 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     const normalizedX = Math.min(Math.max(x / rect.width, 0), 1);
     const normalizedY = Math.min(Math.max(y / rect.height, 0), 1);
 
-    setOverlays((prev) =>
-      prev.map((item) =>
-        item.id === draggingId
-          ? { ...item, x: normalizedX, y: normalizedY }
-          : item
-      )
-    );
+    setDragPreview({
+      id: draggingId,
+      page: pageNumber,
+      x: normalizedX,
+      y: normalizedY,
+    });
   }
 
   function stopDragging() {
+    if (!draggingId) {
+      setDragPreview(null);
+      return;
+    }
+
+    const preview = dragPreview;
+    const currentDraggingId = draggingId;
+
+    if (preview && preview.id === currentDraggingId) {
+      const original = overlays.find((item) => item.id === currentDraggingId);
+
+      if (
+        original &&
+        (original.x !== preview.x || original.y !== preview.y)
+      ) {
+        updateOverlays((prev) =>
+          prev.map((item) =>
+            item.id === currentDraggingId
+              ? { ...item, x: preview.x, y: preview.y }
+              : item
+          )
+        );
+      }
+    }
+
     setDraggingId(null);
+    setDragPreview(null);
+  }
+
+  async function downloadPdf() {
+    const token = getToken();
+    if (!token) {
+      setApplyError("Auth token missing. Please log in again.");
+      return;
+    }
+
+    try {
+      const res = await fetch(getDownloadUrl(currentFileId), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Download failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "edited.pdf";
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Download failed";
+      setApplyError(message);
+      console.error(err);
+    }
   }
 
   async function handleApplyChanges() {
@@ -274,9 +438,16 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
     try {
       setIsApplying(true);
-      const result = await applyOverlay(fileId, payload);
-      setApplyMessage("Overlay applied. New file id: " + result.file._id);
+      const result = await applyOverlay(currentFileId, payload);
+      
+      // Update to the new processed file ID
+      setCurrentFileId(result.file._id);
+      
+      setApplyMessage("Overlay applied successfully! Download or continue editing.");
       console.log("New file:", result);
+      
+      // Clear overlays since they're now baked into the PDF
+      updateOverlays([]);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Overlay failed";
       setApplyError(message);
@@ -321,6 +492,12 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             <div
               key={o.id}
               onClick={() => handleSelectOverlay(o.id)}
+              onDoubleClick={() => {
+                setActiveId(o.id);
+                setEditingId(o.id);
+                setDraggingId(null);
+                setDragPreview(null);
+              }}
               style={{
                 padding: "8px",
                 marginBottom: "6px",
@@ -380,6 +557,38 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             flexWrap: "wrap",
           }}
         >
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!canUndo}
+            style={{
+              padding: "6px 12px",
+              border: "1px solid #ccc",
+              borderRadius: "6px",
+              background: canUndo ? "#fff" : "#f3f4f6",
+              color: canUndo ? "#111827" : "#888",
+              cursor: canUndo ? "pointer" : "not-allowed",
+            }}
+          >
+            Undo
+          </button>
+
+          <button
+            type="button"
+            onClick={redo}
+            disabled={!canRedo}
+            style={{
+              padding: "6px 12px",
+              border: "1px solid #ccc",
+              borderRadius: "6px",
+              background: canRedo ? "#fff" : "#f3f4f6",
+              color: canRedo ? "#111827" : "#888",
+              cursor: canRedo ? "pointer" : "not-allowed",
+            }}
+          >
+            Redo
+          </button>
+
           <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             Font Size:
             <input
@@ -420,7 +629,8 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                 if (!activeId) return;
                 const rotation = Number(e.target.value);
                 if (Number.isNaN(rotation)) return;
-                setOverlays((prev) =>
+
+                updateOverlays((prev) =>
                   prev.map((item) =>
                     item.id === activeId ? { ...item, rotation } : item
                   )
@@ -442,7 +652,8 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
               onChange={(e) => {
                 if (!activeId) return;
                 const opacity = Number(e.target.value);
-                setOverlays((prev) =>
+
+                updateOverlays((prev) =>
                   prev.map((item) =>
                     item.id === activeId ? { ...item, opacity } : item
                   )
@@ -482,6 +693,22 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             {isApplying ? "Applying..." : "Apply Changes"}
           </button>
 
+          <button
+            type="button"
+            onClick={downloadPdf}
+            style={{
+              padding: "6px 12px",
+              border: "1px solid #28a745",
+              borderRadius: "6px",
+              background: "#fff",
+              color: "#28a745",
+              cursor: "pointer",
+              fontWeight: "500",
+            }}
+          >
+            Download PDF
+          </button>
+
           <span style={{ fontSize: "12px", color: "#666" }}>
             {activeId ? "Overlay selected" : "Select an overlay to edit style"}
           </span>
@@ -496,7 +723,10 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
         </div>
 
         <Document
-          file={fileUrl}
+          file={{
+            ...fileUrl,
+            url: fileUrl.url || getFilePreviewUrl(currentFileId),
+          }}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
         >
@@ -535,68 +765,86 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                     zIndex: 20,
                   }}
                 >
-                  {pageOverlays.map((o) => (
-                    <div
-                      key={o.id}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        if (editingId === o.id) return;
-                        setActiveId(o.id);
-                        setDraggingId(o.id);
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!draggingId) {
+                  {pageOverlays.map((o) => {
+                    const preview = dragPreview?.id === o.id ? dragPreview : null;
+                    const x = preview ? preview.x : o.x;
+                    const y = preview ? preview.y : o.y;
+
+                    return (
+                      <div
+                        key={o.id}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          if (editingId === o.id) {
+                            setActiveId(o.id);
+                            return;
+                          }
+
                           setActiveId(o.id);
-                        }
-                      }}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        setActiveId(o.id);
-                        setEditingId(o.id);
-                      }}
-                      style={{
-                        position: "absolute",
-                        left: String(o.x * 100) + "%",
-                        top: String(o.y * 100) + "%",
-                        transform:
-                          "translate(-50%, -50%) rotate(" + o.rotation + "deg)",
-                        transformOrigin: "center center",
-                        color: o.style.color,
-                        fontSize: String(o.style.fontSize) + "px",
-                        opacity: o.opacity,
-                        border: o.id === activeId ? "1px solid blue" : "none",
-                        padding: "2px",
-                        fontFamily: "Times New Roman, Times, serif",
-                        lineHeight: "1",
-                        cursor: editingId === o.id ? "text" : "move",
-                        whiteSpace: "nowrap",
-                        userSelect: "none",
-                      }}
-                    >
-                      {o.id === editingId ? (
-                        <input
-                          value={o.content}
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => updateOverlayContent(o.id, e.target.value)}
-                          onBlur={() => setEditingId(null)}
-                          style={{
-                            fontSize: String(o.style.fontSize) + "px",
-                            color: o.style.color,
-                            fontFamily: "Times New Roman, Times, serif",
-                            lineHeight: "1",
-                            border: "1px solid #ccc",
-                            padding: "2px 4px",
-                            minWidth: "60px",
-                            userSelect: "text",
-                          }}
-                        />
-                      ) : (
-                        <span>{o.content}</span>
-                      )}
-                    </div>
-                  ))}
+                          setEditingId(null);
+                          setDraggingId(o.id);
+                          setDragPreview({
+                            id: o.id,
+                            page: o.page,
+                            x: o.x,
+                            y: o.y,
+                          });
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveId(o.id);
+                          if (editingId !== o.id) {
+                            setEditingId(null);
+                          }
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setActiveId(o.id);
+                          setEditingId(o.id);
+                        }}
+                        style={{
+                          position: "absolute",
+                          left: String(x * 100) + "%",
+                          top: String(y * 100) + "%",
+                          transform:
+                            "translate(-50%, -50%) rotate(" + o.rotation + "deg)",
+                          transformOrigin: "center center",
+                          color: o.style.color,
+                          fontSize: String(o.style.fontSize) + "px",
+                          opacity: o.opacity,
+                          border: o.id === activeId ? "1px solid blue" : "none",
+                          padding: "2px",
+                          fontFamily: "Times New Roman, Times, serif",
+                          lineHeight: "1",
+                          cursor: editingId === o.id ? "text" : "move",
+                          whiteSpace: "nowrap",
+                          userSelect: "none",
+                        }}
+                      >
+                        {o.id === editingId ? (
+                          <input
+                            value={o.content}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => updateOverlayContent(o.id, e.target.value)}
+                            onBlur={() => setEditingId(null)}
+                            style={{
+                              fontSize: String(o.style.fontSize) + "px",
+                              color: o.style.color,
+                              fontFamily: "Times New Roman, Times, serif",
+                              lineHeight: "1",
+                              border: "1px solid #ccc",
+                              padding: "2px 4px",
+                              minWidth: "60px",
+                              userSelect: "text",
+                            }}
+                          />
+                        ) : (
+                          <span>{o.content}</span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );

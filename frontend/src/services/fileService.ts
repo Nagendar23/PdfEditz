@@ -3,3 +3,7 @@ export const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:800
 export function getFilePreviewUrl(fileId: string) {
     return `${BASE_URL}/files/${fileId}/preview`;
 }
+
+export function getDownloadUrl(fileId: string) {
+    return `${BASE_URL}/files/${fileId}/preview`;
+}

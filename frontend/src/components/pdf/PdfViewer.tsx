@@ -98,6 +98,10 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const [resizePreview, setResizePreview] = useState<
+    { id: string; fontSize: number } | null
+  >(null);
 
   const [isApplying, setIsApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
@@ -303,7 +307,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   }
 
   function onPageBackgroundClick() {
-    if (draggingId) return;
+    if (draggingId || resizingId) return;
     clearSelection();
   }
 
@@ -343,6 +347,20 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     pageNumber: number,
     event: MouseEvent<HTMLDivElement>
   ) {
+    // Resize handling takes priority over dragging
+    if (resizingId) {
+      const overlay = overlays.find((o) => o.id === resizingId);
+      if (!overlay || overlay.page !== pageNumber) return;
+
+      // Use movementX to change size — scale factor tuned for UX
+      const deltaX = (event as any).movementX || 0;
+      const base = resizePreview?.fontSize ?? overlay.style.fontSize;
+      const newSize = Math.max(8, Math.round(base + deltaX * 0.2));
+
+      setResizePreview({ id: resizingId, fontSize: newSize });
+      return;
+    }
+
     if (!draggingId) return;
 
     const draggingOverlay = overlays.find((o) => o.id === draggingId);
@@ -391,6 +409,32 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
     setDraggingId(null);
     setDragPreview(null);
+  }
+
+  function stopResize() {
+    if (!resizingId) {
+      setResizePreview(null);
+      return;
+    }
+
+    if (resizePreview) {
+      updateOverlays((prev) =>
+        prev.map((item) =>
+          item.id === resizingId
+            ? {
+                ...item,
+                style: {
+                  ...item.style,
+                  fontSize: resizePreview.fontSize,
+                },
+              }
+            : item
+        )
+      );
+    }
+
+    setResizingId(null);
+    setResizePreview(null);
   }
 
   async function downloadPdf() {
@@ -743,8 +787,14 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                   onPageBackgroundDoubleClick(pageNumber, event)
                 }
                 onMouseMove={(event) => onPageMouseMove(pageNumber, event)}
-                onMouseUp={stopDragging}
-                onMouseLeave={stopDragging}
+                onMouseUp={() => {
+                  stopDragging();
+                  stopResize();
+                }}
+                onMouseLeave={() => {
+                  stopDragging();
+                  stopResize();
+                }}
                 style={{
                   position: "relative",
                   width: "fit-content",
@@ -766,6 +816,9 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                     const preview = dragPreview?.id === o.id ? dragPreview : null;
                     const x = preview ? preview.x : o.x;
                     const y = preview ? preview.y : o.y;
+
+                    const displayFontSize =
+                      o.id === resizePreview?.id ? resizePreview.fontSize : o.style.fontSize;
 
                     return (
                       <div
@@ -818,6 +871,28 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                           userSelect: "none",
                         }}
                       >
+                        {o.id === activeId && (
+                          <div
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setResizingId(o.id);
+                              setResizePreview({ id: o.id, fontSize: o.style.fontSize });
+                              // cancel dragging preview when resizing
+                              setDraggingId(null);
+                              setDragPreview(null);
+                            }}
+                            style={{
+                              position: "absolute",
+                              width: "10px",
+                              height: "10px",
+                              background: "blue",
+                              right: "-8px",
+                              bottom: "-8px",
+                              cursor: "nwse-resize",
+                              zIndex: 30,
+                            }}
+                          />
+                        )}
                         {o.id === editingId ? (
                           <input
                             value={o.content}
@@ -826,7 +901,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             onChange={(e) => updateOverlayContent(o.id, e.target.value)}
                             onBlur={() => setEditingId(null)}
                             style={{
-                              fontSize: String(o.style.fontSize) + "px",
+                              fontSize: String(displayFontSize) + "px",
                               color: o.style.color,
                               fontFamily: "Times New Roman, Times, serif",
                               lineHeight: "1",
@@ -837,7 +912,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             }}
                           />
                         ) : (
-                          <span>{o.content}</span>
+                          <span style={{ fontSize: String(displayFontSize) + "px" }}>{o.content}</span>
                         )}
                       </div>
                     );

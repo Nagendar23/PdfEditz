@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, memo, type ComponentProps, type MouseEvent } from "react";
+import { useState, useEffect, useMemo, memo, type ComponentProps, type MouseEvent, type ChangeEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { applyOverlay, type OverlayRequestPayload } from "@/services/api";
-import { getDownloadUrl, getFilePreviewUrl } from "@/services/fileService";
+import { applyOverlay, uploadFile, type OverlayRequestPayload } from "@/services/api";
+import { getDownloadUrl, getFilePreviewUrl, normalizeUploadUrl } from "@/services/fileService";
 import { getToken } from "@/utils/auth";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -32,19 +32,51 @@ interface OverlayText {
   };
 }
 
-interface OverlayHistoryState {
-  past: OverlayText[][];
-  present: OverlayText[];
-  future: OverlayText[][];
+interface OverlayImage {
+  id: string;
+  type: "image";
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  imageFileId: string;
+  imageUrl: string;
 }
 
-type OverlayUpdate = OverlayText[] | ((current: OverlayText[]) => OverlayText[]);
+type OverlayItem = OverlayText | OverlayImage;
+
+interface OverlayHistoryState {
+  past: OverlayItem[][];
+  present: OverlayItem[];
+  future: OverlayItem[][];
+}
+
+type OverlayUpdate = OverlayItem[] | ((current: OverlayItem[]) => OverlayItem[]);
 
 interface DragPreviewState {
   id: string;
   page: number;
   x: number;
   y: number;
+}
+
+interface ResizePreviewState {
+  id: string;
+  type: "text" | "image";
+  fontSize?: number;
+  width?: number;
+  height?: number;
+}
+
+interface UploadedFile {
+  _id: string;
+  fileUrl: string;
+  originalName?: string;
+  fileType?: string;
+  size?: number;
 }
 
 function createOverlayId() {
@@ -57,27 +89,52 @@ function createOverlayId() {
   return Date.now().toString() + "-" + Math.random().toString(36).slice(2, 8);
 }
 
-function buildPayload(overlays: OverlayText[]): OverlayRequestPayload {
+function buildPayload(overlays: OverlayItem[]): OverlayRequestPayload {
   return {
     elements: overlays
-      .filter((o) => o.content.trim().length > 0)
-      .map((o) => ({
-        type: "text",
-        text: o.content,
-        page: o.page - 1,
-        position: {
-          x: o.x,
-          y: o.y,
-        },
-        rotation: o.rotation,
-        opacity: o.opacity,
-        style: {
-          fontSize: o.style.fontSize,
-          color: o.style.color,
-          align: "center",
-          previewScale: PAGE_SCALE,
-        },
-      })),
+      .map((o) => {
+        if (o.type === "image") {
+          return {
+            type: "image" as const,
+            imageFileId: o.imageFileId,
+            page: o.page - 1,
+            position: {
+              x: o.x,
+              y: o.y,
+            },
+            size: {
+              width: o.width,
+              height: o.height,
+            },
+            previewScale: PAGE_SCALE,
+            rotation: o.rotation,
+            opacity: o.opacity,
+          };
+        }
+
+        if (o.content.trim().length === 0) {
+          return null;
+        }
+
+        return {
+          type: "text" as const,
+          text: o.content,
+          page: o.page - 1,
+          position: {
+            x: o.x,
+            y: o.y,
+          },
+          rotation: o.rotation,
+          opacity: o.opacity,
+          style: {
+            fontSize: o.style.fontSize,
+            color: o.style.color,
+            align: "center" as const,
+            previewScale: PAGE_SCALE,
+          },
+        };
+      })
+      .filter((element): element is NonNullable<typeof element> => element !== null),
   };
 }
 
@@ -85,6 +142,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [error, setError] = useState(false);
   const [currentFileId, setCurrentFileId] = useState(fileId);
+  const [pendingImage, setPendingImage] = useState<UploadedFile | null>(null);
 
   const [history, setHistory] = useState<OverlayHistoryState>({
     past: [],
@@ -99,9 +157,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
-  const [resizePreview, setResizePreview] = useState<
-    { id: string; fontSize: number } | null
-  >(null);
+  const [resizePreview, setResizePreview] = useState<ResizePreviewState | null>(null);
 
   const [isApplying, setIsApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
@@ -125,7 +181,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     setHistory((prev) => {
       const newPresent =
         typeof next === "function"
-          ? (next as (current: OverlayText[]) => OverlayText[])(prev.present)
+          ? (next as (current: OverlayItem[]) => OverlayItem[])(prev.present)
           : next;
 
       if (newPresent === prev.present) {
@@ -198,7 +254,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       if (Array.isArray(parsed)) {
         setHistory({
           past: [],
-          present: parsed as OverlayText[],
+          present: parsed as OverlayItem[],
           future: [],
         });
       } else {
@@ -306,8 +362,20 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     setEditingId(newId);
   }
 
-  function onPageBackgroundClick() {
+  function onPageBackgroundClick(
+    pageNumber: number,
+    event: MouseEvent<HTMLDivElement>
+  ) {
     if (draggingId || resizingId) return;
+
+    console.log("🖱️ Click on page", pageNumber, "pendingImage:", !!pendingImage);
+
+    if (pendingImage) {
+      console.log("➡️ Creating image overlay from pending image");
+      createImageOverlayAtClick(pageNumber, event);
+      return;
+    }
+
     clearSelection();
   }
 
@@ -315,22 +383,24 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     pageNumber: number,
     event: MouseEvent<HTMLDivElement>
   ) {
-    if (draggingId) return;
+    if (draggingId || resizingId || pendingImage) return;
     createOverlayAtClick(pageNumber, event);
   }
 
   function updateOverlayContent(id: string, content: string) {
     updateOverlays((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, content } : item))
+      prev.map((item) =>
+        item.id === id && item.type === "text" ? { ...item, content } : item
+      )
     );
   }
 
   function updateActiveOverlayStyle(stylePatch: Partial<OverlayText["style"]>) {
-    if (!activeId) return;
+    if (!activeId || !activeOverlay || activeOverlay.type !== "text") return;
 
     updateOverlays((prev) =>
       prev.map((item) =>
-        item.id === activeId
+        item.id === activeId && item.type === "text"
           ? {
               ...item,
               style: {
@@ -343,6 +413,75 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     );
   }
 
+  async function handleImageUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+
+    if (!file) return;
+
+    console.log("Uploading:", file);
+
+    try {
+      const uploaded = await uploadFile(file);
+      console.log("Upload success:", uploaded);
+      setPendingImage(uploaded);
+      setApplyMessage("Image uploaded. Click on PDF to place it.");
+      setApplyError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Upload failed";
+      console.error("Upload failed:", err);
+      setApplyError(message);
+    }
+  }
+
+  function createImageOverlayAtClick(
+    pageNumber: number,
+    event: MouseEvent<HTMLDivElement>
+  ) {
+    if (!pendingImage) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const normalizedX = Math.min(Math.max(x / rect.width, 0), 1);
+    const normalizedY = Math.min(Math.max(y / rect.height, 0), 1);
+    const newId = createOverlayId();
+
+    const imageUrl = normalizeUploadUrl(pendingImage.fileUrl);
+
+    console.log("📸 Creating image overlay:", {
+      pageNumber,
+      x: normalizedX,
+      y: normalizedY,
+      imageFileId: pendingImage._id,
+      imageUrl,
+      fileUrl: pendingImage.fileUrl,
+      pendingImage,
+    });
+
+    updateOverlays((prev) => [
+      ...prev,
+      {
+        id: newId,
+        type: "image",
+        page: pageNumber,
+        x: normalizedX,
+        y: normalizedY,
+        imageFileId: pendingImage._id,
+        imageUrl,
+        width: 150,
+        height: 100,
+        rotation: 0,
+        opacity: 1,
+      },
+    ]);
+
+    setPendingImage(null);
+    setActiveId(newId);
+    setEditingId(null);
+  }
+
   function onPageMouseMove(
     pageNumber: number,
     event: MouseEvent<HTMLDivElement>
@@ -353,11 +492,28 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       if (!overlay || overlay.page !== pageNumber) return;
 
       // Use movementX to change size — scale factor tuned for UX
-      const deltaX = (event as any).movementX || 0;
+      const deltaX = (event.nativeEvent as unknown as MouseEvent).movementX || 0;
+
+      if (overlay.type === "image") {
+        const baseWidth = resizePreview?.width ?? overlay.width;
+        const baseHeight = resizePreview?.height ?? overlay.height;
+        const newWidth = Math.max(20, Math.round(baseWidth + deltaX * 0.6));
+        const aspectRatio = baseWidth > 0 ? baseHeight / baseWidth : 1;
+        const newHeight = Math.max(20, Math.round(newWidth * aspectRatio));
+
+        setResizePreview({
+          id: resizingId,
+          type: "image",
+          width: newWidth,
+          height: newHeight,
+        });
+        return;
+      }
+
       const base = resizePreview?.fontSize ?? overlay.style.fontSize;
       const newSize = Math.max(8, Math.round(base + deltaX * 0.2));
 
-      setResizePreview({ id: resizingId, fontSize: newSize });
+      setResizePreview({ id: resizingId, type: "text", fontSize: newSize });
       return;
     }
 
@@ -420,15 +576,23 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     if (resizePreview) {
       updateOverlays((prev) =>
         prev.map((item) =>
-          item.id === resizingId
-            ? {
-                ...item,
-                style: {
-                  ...item.style,
-                  fontSize: resizePreview.fontSize,
-                },
-              }
-            : item
+          item.id !== resizingId
+            ? item
+            : resizePreview.type === "image" && item.type === "image"
+              ? {
+                  ...item,
+                  width: resizePreview.width!,
+                  height: resizePreview.height!,
+                }
+              : resizePreview.type === "text" && item.type === "text"
+                ? {
+                    ...item,
+                    style: {
+                      ...item.style,
+                      fontSize: resizePreview.fontSize!,
+                    },
+                  }
+                : item
         )
       );
     }
@@ -501,6 +665,16 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     }
   }
 
+  // Memoize document file prop (must be before early returns)
+  const documentFile = useMemo(
+    () => {
+      if (typeof fileUrl === "string") return fileUrl;
+      if (fileUrl === null) return getFilePreviewUrl(currentFileId);
+      return fileUrl;
+    },
+    [fileUrl, currentFileId]
+  );
+
   if (error) {
     return <div>Failed to load PDF</div>;
   }
@@ -526,6 +700,20 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
         }}
       >
         <h3 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Overlays</h3>
+
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "13px", color: "#444" }}>Upload image:</span>
+            <input type="file" accept="image/*" onChange={handleImageUpload} />
+          </label>
+          {pendingImage && (
+            <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
+              Image ready: click on PDF to place it.
+            </div>
+          )}
+        </div>
+
+        <hr style={{ margin: "10px 0", border: "none", borderTop: "1px solid #ddd" }} />
 
         {overlays.length === 0 ? (
           <div style={{ fontSize: "12px", color: "#666" }}>
@@ -560,7 +748,9 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                 }}
               >
                 <strong style={{ fontSize: "13px" }}>
-                  {o.content.trim() || "Text " + String(index + 1)}
+                  {o.type === "image"
+                    ? "Image " + String(index + 1)
+                    : o.content.trim() || "Text " + String(index + 1)}
                 </strong>
 
                 <button
@@ -633,35 +823,39 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             Redo
           </button>
 
-          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            Font Size:
-            <input
-              type="number"
-              min={8}
-              value={activeOverlay?.style.fontSize ?? 16}
-              disabled={!activeId}
-              onChange={(e) => {
-                if (!activeId) return;
-                const size = Number(e.target.value);
-                if (Number.isNaN(size)) return;
-                updateActiveOverlayStyle({ fontSize: Math.max(8, size) });
-              }}
-              style={{ width: "70px" }}
-            />
-          </label>
+          {activeOverlay && activeOverlay.type === "text" && (
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                Font Size:
+                <input
+                  type="number"
+                  min={8}
+                  value={activeOverlay.style.fontSize}
+                  disabled={!activeId}
+                  onChange={(e) => {
+                    if (!activeId) return;
+                    const size = Number(e.target.value);
+                    if (Number.isNaN(size)) return;
+                    updateActiveOverlayStyle({ fontSize: Math.max(8, size) });
+                  }}
+                  style={{ width: "70px" }}
+                />
+              </label>
 
-          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            Color:
-            <input
-              type="color"
-              value={activeOverlay?.style.color ?? "#ff0000"}
-              disabled={!activeId}
-              onChange={(e) => {
-                if (!activeId) return;
-                updateActiveOverlayStyle({ color: e.target.value });
-              }}
-            />
-          </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                Color:
+                <input
+                  type="color"
+                  value={activeOverlay.style.color}
+                  disabled={!activeId}
+                  onChange={(e) => {
+                    if (!activeId) return;
+                    updateActiveOverlayStyle({ color: e.target.value });
+                  }}
+                />
+              </label>
+            </>
+          )}
 
           <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             Rotation:
@@ -768,10 +962,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
         {/* stabilize the Document `file` prop so unrelated state updates don't recreate it */}
         <Document
-          file={useMemo(
-            () => ({ ...fileUrl, url: fileUrl.url || getFilePreviewUrl(currentFileId) }),
-            [fileUrl, currentFileId]
-          )}
+          file={documentFile}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
         >
@@ -782,7 +973,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             return (
               <div
                 key={pageNumber}
-                onClick={onPageBackgroundClick}
+                onClick={(event) => onPageBackgroundClick(pageNumber, event)}
                 onDoubleClick={(event) =>
                   onPageBackgroundDoubleClick(pageNumber, event)
                 }
@@ -817,8 +1008,25 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                     const x = preview ? preview.x : o.x;
                     const y = preview ? preview.y : o.y;
 
+                    const isResizingThis = resizePreview?.id === o.id;
                     const displayFontSize =
-                      o.id === resizePreview?.id ? resizePreview.fontSize : o.style.fontSize;
+                      o.type === "text"
+                        ? isResizingThis && resizePreview?.type === "text"
+                          ? resizePreview.fontSize!
+                          : o.style.fontSize
+                        : 16;
+                    const displayWidth =
+                      o.type === "image"
+                        ? isResizingThis && resizePreview?.type === "image"
+                          ? resizePreview.width!
+                          : o.width
+                        : 0;
+                    const displayHeight =
+                      o.type === "image"
+                        ? isResizingThis && resizePreview?.type === "image"
+                          ? resizePreview.height!
+                          : o.height
+                        : 0;
 
                     return (
                       <div
@@ -859,16 +1067,16 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                           transform:
                             "translate(-50%, -50%) rotate(" + o.rotation + "deg)",
                           transformOrigin: "center center",
-                          color: o.style.color,
-                          fontSize: String(o.style.fontSize) + "px",
                           opacity: o.opacity,
                           border: o.id === activeId ? "1px solid blue" : "none",
-                          padding: "2px",
-                          fontFamily: "Times New Roman, Times, serif",
+                          padding: o.type === "text" ? "2px" : "0",
+                          fontFamily: o.type === "text" ? "Times New Roman, Times, serif" : undefined,
                           lineHeight: "1",
-                          cursor: editingId === o.id ? "text" : "move",
-                          whiteSpace: "nowrap",
+                          cursor: o.type === "text" && editingId === o.id ? "text" : "move",
+                          whiteSpace: o.type === "text" ? "nowrap" : "normal",
                           userSelect: "none",
+                          width: o.type === "image" ? String(displayWidth) + "px" : undefined,
+                          height: o.type === "image" ? String(displayHeight) + "px" : undefined,
                         }}
                       >
                         {o.id === activeId && (
@@ -876,7 +1084,20 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             onMouseDown={(e) => {
                               e.stopPropagation();
                               setResizingId(o.id);
-                              setResizePreview({ id: o.id, fontSize: o.style.fontSize });
+                              setResizePreview(
+                                o.type === "image"
+                                  ? {
+                                      id: o.id,
+                                      type: "image",
+                                      width: o.width,
+                                      height: o.height,
+                                    }
+                                  : {
+                                      id: o.id,
+                                      type: "text",
+                                      fontSize: o.style.fontSize,
+                                    }
+                              );
                               // cancel dragging preview when resizing
                               setDraggingId(null);
                               setDragPreview(null);
@@ -893,7 +1114,23 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             }}
                           />
                         )}
-                        {o.id === editingId ? (
+                        {o.type === "image" ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={normalizeUploadUrl(o.imageUrl)}
+                            alt="Overlay image"
+                            draggable={false}
+                            onLoad={() => console.log("✅ Image loaded:", o.imageUrl)}
+                            onError={() => console.error("❌ Image failed to load:", o.imageUrl)}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              opacity: o.opacity,
+                              objectFit: "contain",
+                              display: "block",
+                            }}
+                          />
+                        ) : o.id === editingId ? (
                           <input
                             value={o.content}
                             autoFocus
@@ -912,7 +1149,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             }}
                           />
                         ) : (
-                          <span style={{ fontSize: String(displayFontSize) + "px" }}>{o.content}</span>
+                          <span style={{ color: o.style.color, fontSize: String(displayFontSize) + "px" }}>{o.content}</span>
                         )}
                       </div>
                     );
@@ -939,3 +1176,5 @@ const MemoPdfPage = memo(
   ),
   (prev, next) => prev.pageNumber === next.pageNumber
 );
+
+MemoPdfPage.displayName = "MemoPdfPage";

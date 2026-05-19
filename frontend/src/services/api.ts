@@ -32,24 +32,82 @@ export async function getFiles(){
     }
 }
 
-export interface OverlayRequestPayload{
-    elements:Array<{
-        type:"text";
-        text:string;
-        page:number;
-        position:{
-            x:number;
-            y:number;
+export interface OverlayRequestPayload {
+  elements: Array<
+    | {
+        type: "text";
+        text: string;
+        page: number;
+        position: {
+          x: number;
+          y: number;
         };
-        rotation:number;
-        opacity:number;
-        style:{
-            fontSize:number;
-            color:string;
-            align?:"left" | "center" | "right";
-            previewScale?: number;
-        }
-    }>
+        rotation: number;
+        opacity: number;
+        style: {
+          fontSize: number;
+          color: string;
+          align?: "left" | "center" | "right";
+          previewScale?: number;
+        };
+      }
+    | {
+        type: "image";
+        imageFileId: string;
+        page: number;
+        position: {
+          x: number;
+          y: number;
+        };
+        size: {
+          width: number;
+          height: number;
+        };
+        previewScale?: number;
+        rotation: number;
+        opacity: number;
+      }
+  >;
+}
+
+export interface UploadedFile {
+  _id: string;
+  fileUrl: string;
+  originalName: string;
+  fileType: string;
+  size: number;
+}
+
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const token = getToken();
+  if (!token) {
+    throw new Error("Missing auth token");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${BASE_URL}/files/upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(data?.message || "Upload failed");
+  }
+
+  return {
+    _id: data._id || data.fileId,
+    fileUrl: data.fileUrl,
+    originalName: data.originalName,
+    fileType: data.fileType,
+    size: data.size,
+  };
 }
 
 export interface ApplyOverlayResponse{

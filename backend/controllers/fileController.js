@@ -48,10 +48,24 @@ const fileUpload = async (req, res) => {
     });
     await file.save();
     console.log("File uploaded successfully", file._id);
+    
+    // Verify file was actually written to disk
+    const filePath = path.join(process.cwd(), "uploads", filename);
+    const fileExists = fs.existsSync(filePath);
+    console.log("File exists on disk:", fileExists, "at path:", filePath);
+    
+    if (!fileExists) {
+      console.warn("⚠️ File saved to DB but not found on disk!");
+    }
+    
     return res.status(200).json({
       message: "Uploaded successfully",
+      _id: file._id,
       fileId: file._id,
       fileUrl: `/uploads/${filename}`,
+      originalName: file.originalName,
+      fileType: file.fileType,
+      size: file.size,
     });
   } catch (err) {
     console.log("Error uploading file ", err);
@@ -497,6 +511,19 @@ const pdfMerge = async (req, res) => {
   }
 };
 
+const getMimeTypeFromFileName = (filename) => {
+  const ext = filename?.split(".").pop()?.toLowerCase();
+  const mimeMap = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+  };
+  return mimeMap[ext] || null;
+};
+
 const previewFile = async (req, res) => {
   try {
     const fileId = req.params.id;
@@ -522,7 +549,7 @@ const previewFile = async (req, res) => {
       pdf: "application/pdf",
       doc: "application/msword",
       docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      image: "image/jpeg",
+      image: getMimeTypeFromFileName(file.storedName) || "image/jpeg",
     };
     
     //set for inline viewing

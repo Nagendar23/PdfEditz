@@ -175,14 +175,19 @@ export const processPDF = async ({ inputPath, outputPath, elements }) => {
 
         const imgWidth = toFiniteNumber(el.size?.width, 100);
         const imgHeight = toFiniteNumber(el.size?.height, 100);
+        const previewScale = Math.max(0.1, toFiniteNumber(el.previewScale, 1));
         const rotation = -toFiniteNumber(el.rotation, 0);
         const opacity = toFiniteNumber(el.opacity, 1);
+        const pdfWidth = imgWidth / previewScale;
+        const pdfHeight = imgHeight / previewScale;
+        const drawX = x - pdfWidth / 2;
+        const drawY = y - pdfHeight / 2;
 
         page.drawImage(image, {
-          x,
-          y,
-          width: imgWidth,
-          height: imgHeight,
+          x: drawX,
+          y: drawY,
+          width: pdfWidth,
+          height: pdfHeight,
           rotate: degrees(rotation),
           opacity,
         });

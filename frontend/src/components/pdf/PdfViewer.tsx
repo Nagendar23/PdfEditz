@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type ComponentProps, type MouseEvent } from "react";
+import { useState, useEffect, useMemo, memo, type ComponentProps, type MouseEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { applyOverlay, type OverlayRequestPayload } from "@/services/api";
 import { getDownloadUrl, getFilePreviewUrl } from "@/services/fileService";
@@ -722,11 +722,12 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
           )}
         </div>
 
+        {/* stabilize the Document `file` prop so unrelated state updates don't recreate it */}
         <Document
-          file={{
-            ...fileUrl,
-            url: fileUrl.url || getFilePreviewUrl(currentFileId),
-          }}
+          file={useMemo(
+            () => ({ ...fileUrl, url: fileUrl.url || getFilePreviewUrl(currentFileId) }),
+            [fileUrl, currentFileId]
+          )}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
         >
@@ -751,12 +752,8 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                   marginBottom: "12px",
                 }}
               >
-                <Page
-                  pageNumber={pageNumber}
-                  scale={PAGE_SCALE}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                />
+                {/* Memoized Page to avoid re-rendering PDF canvas on overlay edits */}
+                <MemoPdfPage pageNumber={pageNumber} />
 
                 <div
                   style={{
@@ -854,3 +851,16 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     </div>
   );
 }
+
+// Memoized wrapper around react-pdf's Page to avoid re-rendering the canvas
+const MemoPdfPage = memo(
+  ({ pageNumber }: { pageNumber: number }) => (
+    <Page
+      pageNumber={pageNumber}
+      scale={PAGE_SCALE}
+      renderTextLayer={false}
+      renderAnnotationLayer={false}
+    />
+  ),
+  (prev, next) => prev.pageNumber === next.pageNumber
+);

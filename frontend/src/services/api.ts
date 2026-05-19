@@ -7,12 +7,20 @@ export async function getFiles(){
     try{
         const token = getToken();
         console.log("token is :",token)
+        // If there's no auth token, return empty list instead of calling protected API
+        if(!token){
+            console.log("No auth token found — returning empty file list");
+            return []
+        }
+
         const response = await fetch(`${BASE_URL}/files`,{
             headers:{
                 Authorization:`Bearer ${token}`,
             },
         });
         if(!response.ok){
+            const text = await response.text().catch(()=>null)
+            console.error("Failed to fetch files. Status:", response.status, "Body:", text)
             throw new Error(`Failed to fetch files, Error : ${response.status}`)
         }
         const data = await response.json();

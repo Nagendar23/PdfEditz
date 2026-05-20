@@ -284,6 +284,23 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     localStorage.setItem(storageKey, JSON.stringify(overlays));
   }, [overlays, fileId, isOverlayHydrated]);
 
+  useEffect(() => {
+    if (activeId && !overlays.some((item) => item.id === activeId)) {
+      setActiveId(null);
+    }
+    if (editingId && !overlays.some((item) => item.id === editingId)) {
+      setEditingId(null);
+    }
+    if (draggingId && !overlays.some((item) => item.id === draggingId)) {
+      setDraggingId(null);
+      setDragPreview(null);
+    }
+    if (resizingId && !overlays.some((item) => item.id === resizingId)) {
+      setResizingId(null);
+      setResizePreview(null);
+    }
+  }, [overlays, activeId, editingId, draggingId, resizingId]);
+
   function handleSelectOverlay(id: string) {
     setDraggingId(null);
     setDragPreview(null);
@@ -497,9 +514,9 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       if (overlay.type === "image") {
         const baseWidth = resizePreview?.width ?? overlay.width;
         const baseHeight = resizePreview?.height ?? overlay.height;
-        const newWidth = Math.max(20, Math.round(baseWidth + deltaX * 0.6));
+        const newWidth = Math.max(40, Math.min(600, Math.round(baseWidth + deltaX * 0.6)));
         const aspectRatio = baseWidth > 0 ? baseHeight / baseWidth : 1;
-        const newHeight = Math.max(20, Math.round(newWidth * aspectRatio));
+        const newHeight = Math.max(40, Math.round(newWidth * aspectRatio));
 
         setResizePreview({
           id: resizingId,
@@ -511,7 +528,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       }
 
       const base = resizePreview?.fontSize ?? overlay.style.fontSize;
-      const newSize = Math.max(8, Math.round(base + deltaX * 0.2));
+      const newSize = Math.max(8, Math.min(120, Math.round(base + deltaX * 0.2)));
 
       setResizePreview({ id: resizingId, type: "text", fontSize: newSize });
       return;
@@ -556,7 +573,11 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
         updateOverlays((prev) =>
           prev.map((item) =>
             item.id === currentDraggingId
-              ? { ...item, x: preview.x, y: preview.y }
+              ? {
+                  ...item,
+                  x: Math.max(0, Math.min(1, preview.x)),
+                  y: Math.max(0, Math.min(1, preview.y)),
+                }
               : item
           )
         );
@@ -581,15 +602,15 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             : resizePreview.type === "image" && item.type === "image"
               ? {
                   ...item,
-                  width: resizePreview.width!,
-                  height: resizePreview.height!,
+                  width: Math.max(40, Math.min(600, resizePreview.width!)),
+                  height: Math.max(40, resizePreview.height!),
                 }
               : resizePreview.type === "text" && item.type === "text"
                 ? {
                     ...item,
                     style: {
                       ...item.style,
-                      fontSize: resizePreview.fontSize!,
+                      fontSize: Math.max(8, Math.min(120, resizePreview.fontSize!)),
                     },
                   }
                 : item
@@ -830,13 +851,14 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                 <input
                   type="number"
                   min={8}
+                  max={120}
                   value={activeOverlay.style.fontSize}
                   disabled={!activeId}
                   onChange={(e) => {
                     if (!activeId) return;
                     const size = Number(e.target.value);
                     if (Number.isNaN(size)) return;
-                    updateActiveOverlayStyle({ fontSize: Math.max(8, size) });
+                    updateActiveOverlayStyle({ fontSize: Math.max(8, Math.min(120, size)) });
                   }}
                   style={{ width: "70px" }}
                 />
@@ -1067,9 +1089,10 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                           transform:
                             "translate(-50%, -50%) rotate(" + o.rotation + "deg)",
                           transformOrigin: "center center",
+                          zIndex: o.id === activeId ? 1000 : 1,
                           opacity: o.opacity,
                           border: o.id === activeId ? "1px solid blue" : "none",
-                          padding: o.type === "text" ? "2px" : "0",
+                          padding: "6px",
                           fontFamily: o.type === "text" ? "Times New Roman, Times, serif" : undefined,
                           lineHeight: "1",
                           cursor: o.type === "text" && editingId === o.id ? "text" : "move",
@@ -1128,13 +1151,22 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                               opacity: o.opacity,
                               objectFit: "contain",
                               display: "block",
+                              userSelect: "none",
+                              pointerEvents: "none",
                             }}
                           />
                         ) : o.id === editingId ? (
                           <input
                             value={o.content}
                             autoFocus
-                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              handleSelectOverlay(o.id);
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectOverlay(o.id);
+                            }}
                             onChange={(e) => updateOverlayContent(o.id, e.target.value)}
                             onBlur={() => setEditingId(null)}
                             style={{
@@ -1149,7 +1181,24 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                             }}
                           />
                         ) : (
-                          <span style={{ color: o.style.color, fontSize: String(displayFontSize) + "px" }}>{o.content}</span>
+                          <span
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              handleSelectOverlay(o.id);
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectOverlay(o.id);
+                            }}
+                            style={{
+                              color: o.style.color,
+                              fontSize: String(displayFontSize) + "px",
+                              display: "inline-block",
+                              pointerEvents: "auto",
+                            }}
+                          >
+                            {o.content}
+                          </span>
                         )}
                       </div>
                     );

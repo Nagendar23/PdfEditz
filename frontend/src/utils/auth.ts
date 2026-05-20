@@ -1,6 +1,1 @@
-export function getToken(){
-    if(typeof window === "undefined"){
-        return null
-    }
-    return localStorage.getItem("token")
-}
+export { getToken } from "@/services/authService";

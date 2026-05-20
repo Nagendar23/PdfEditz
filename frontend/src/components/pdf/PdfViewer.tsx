@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, memo, type ComponentProps, type MouseEven
 import { Document, Page, pdfjs } from "react-pdf";
 import { applyOverlay, uploadFile, type OverlayRequestPayload } from "@/services/api";
 import { getDownloadUrl, getFilePreviewUrl, normalizeUploadUrl } from "@/services/fileService";
-import { getToken } from "@/utils/auth";
+import { getToken } from "@/services/authService";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 

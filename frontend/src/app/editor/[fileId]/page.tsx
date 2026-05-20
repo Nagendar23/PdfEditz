@@ -1,9 +1,10 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { getFilePreviewUrl } from "@/services/fileService";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
 
 const PdfViewer = dynamic(() => import("@/components/pdf/PdfViewer"), {
   ssr: false,
@@ -11,7 +12,8 @@ const PdfViewer = dynamic(() => import("@/components/pdf/PdfViewer"), {
 
 export default function EditorPage() {
   const params = useParams();
-  const [fileObj, setFileObj] = useState<any>(null);
+  const router = useRouter();
+  const { token, isReady } = useAuth();
 
   const fileIdParam = Array.isArray(params.fileId)
     ? params.fileId[0]
@@ -20,26 +22,35 @@ export default function EditorPage() {
   const fileId = typeof fileIdParam === "string" ? fileIdParam : "";
 
   useEffect(() => {
-    if (fileId) {
-      const token = localStorage.getItem("token") || "";
-      setFileObj({
-        url: getFilePreviewUrl(fileId),
-        httpHeaders: {
-          Authorization: "Bearer " + token,
-        },
-      });
+    if (!isReady) {
+      return;
     }
-  }, [fileId]);
+
+    if (!token) {
+      router.replace("/login");
+    }
+  }, [isReady, token, router]);
 
   if (!fileId) {
     return <div>Invalid file</div>;
   }
 
+  if (!isReady || !token) {
+    return <div className="p-5">Loading authentication...</div>;
+  }
+
+  const fileObj = {
+    url: getFilePreviewUrl(fileId),
+    httpHeaders: {
+      Authorization: `Bearer ${token}`,
+    },
+  };
+
   return (
     <div className="p-5">
-      <h1>Editor Page</h1>
-      <p>File ID : {fileId}</p>
-      <div className="mt-4 border">
+      <h1 className="text-2xl font-semibold">Editor Page</h1>
+      <p className="text-sm text-slate-600">File ID: {fileId}</p>
+      <div className="mt-4 border border-slate-200 bg-white shadow-sm">
         {fileObj ? (
           <PdfViewer fileUrl={fileObj} fileId={fileId} />
         ) : (

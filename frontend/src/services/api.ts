@@ -1,4 +1,4 @@
-import { getToken } from "@/utils/auth";
+import { getToken } from "@/services/authService";
 // import { type } from 'os';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";

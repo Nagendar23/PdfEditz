@@ -9,6 +9,7 @@ import testUpload from './routes/testUpload.js'
 import authRouter from "./routes/authRoute.js";
 import authMiddleware from "./middleware/authMiddleware.js";
 import fileRouter from "./routes/fileRoute.js";
+import watermarkRouter from "./routes/watermarkRoute.js";
 import cron from 'node-cron';
 import cleanUpExpiredFiles from "./utils/cleanup.js";
 
@@ -44,6 +45,8 @@ app.use('/api/test-upload',testUpload)
 app.use('/api/auth',authRouter)
 
 app.use('/api/files',fileRouter)
+
+app.use('/api/watermark', watermarkRouter)
 
 app.use('/api/auth/me',authMiddleware, (req,res)=>{
     res.json({

@@ -123,6 +123,12 @@ export default function Dashboard() {
                     >
                         Merge PDFs
                     </Link>
+                    <Link
+                        href="/tools/watermark"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100"
+                    >
+                        Watermark
+                    </Link>
                     <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
                         <input
                             type="file"

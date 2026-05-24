@@ -146,3 +146,60 @@ export async function applyOverlay(
     }
     return data as ApplyOverlayResponse;
 }
+
+export type WatermarkPosition = "center" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+export interface TextWatermarkRequest {
+  file: File;
+  text: string;
+  opacity: number;
+  rotation: number;
+  fontSize: number;
+  color: string;
+  position: WatermarkPosition;
+}
+
+export interface WatermarkResponse {
+  message: string;
+  file: {
+    _id: string;
+    originalName: string;
+    storedName: string;
+    fileType: string;
+    size: number;
+    operation: string;
+  };
+}
+
+export async function applyTextWatermark(payload: TextWatermarkRequest): Promise<WatermarkResponse> {
+  const token = getToken();
+
+  if (!token) {
+    throw new Error("missing auth token");
+  }
+
+  const formData = new FormData();
+  formData.append("file", payload.file);
+  formData.append("text", payload.text);
+  formData.append("opacity", String(payload.opacity));
+  formData.append("rotation", String(payload.rotation));
+  formData.append("fontSize", String(payload.fontSize));
+  formData.append("color", payload.color);
+  formData.append("position", payload.position);
+
+  const res = await fetch(`${BASE_URL}/watermark/text`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(data?.message || "Failed to apply watermark");
+  }
+
+  return data as WatermarkResponse;
+}

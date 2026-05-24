@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { getFiles } from "@/services/api";
 import { FileType } from "@/types/file";
 import { useAuth } from "@/context/AuthContext";
-import { uploadPdf } from "@/services/fileService";
+import { deleteFile, uploadPdf } from "@/services/fileService";
 
 export default function Dashboard() {
     const router = useRouter();
@@ -14,6 +13,7 @@ export default function Dashboard() {
     const [files, setFiles] = useState<FileType[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
 
     const loadFiles = useCallback(async (showLoading = false) => {
         if (showLoading) {
@@ -45,7 +45,7 @@ export default function Dashboard() {
         void loadFiles(true);
     }, [isReady, token, router, loadFiles]);
 
-    async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
 
         if (!file) {
@@ -82,6 +82,24 @@ export default function Dashboard() {
         }
     }
 
+    async function handleDelete(fileId: string) {
+        const confirmed = window.confirm("Delete this file?");
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            setDeletingId(fileId);
+            await deleteFile(fileId);
+            await loadFiles();
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setDeletingId(null);
+        }
+    }
+
     if (!isReady || !token) {
         return <div className="p-6">Loading authentication...</div>;
     }
@@ -98,6 +116,12 @@ export default function Dashboard() {
                     {user && <p className="text-sm text-slate-600">Signed in as {user.name}</p>}
                 </div>
                 <div className="flex items-center gap-3">
+                    <a
+                        href="/tools/merge"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100"
+                    >
+                        Merge PDFs
+                    </a>
                     <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
                         <input
                             type="file"
@@ -124,11 +148,22 @@ export default function Dashboard() {
                 ) : (
                     <div className="space-y-3">
                         {files.map((file) => (
-                            <Link key={file._id} href={`/editor/${file._id}`}>
-                                <div className="cursor-pointer rounded-xl border border-slate-200 px-4 py-3 transition hover:border-slate-400 hover:bg-slate-50">
+                            <div
+                                key={file._id}
+                                className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3 transition hover:border-slate-400 hover:bg-slate-50"
+                            >
+                                <a href={`/editor/${file._id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
                                     {file.originalName}
-                                </div>
-                            </Link>
+                                </a>
+                                <button
+                                    type="button"
+                                    onClick={() => void handleDelete(file._id)}
+                                    disabled={deletingId === file._id}
+                                    className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {deletingId === file._id ? "Deleting..." : "Delete"}
+                                </button>
+                            </div>
                         ))}
                     </div>
                 )}

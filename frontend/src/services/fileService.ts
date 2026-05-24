@@ -66,3 +66,61 @@ export async function uploadPdf(file: File): Promise<UploadPdfResponse> {
 
     return data as UploadPdfResponse;
 }
+
+export async function deleteFile(fileId: string) {
+    const token = getToken();
+
+    if (!token) {
+        throw new Error("Missing auth token");
+    }
+
+    const res = await fetch(`${BASE_URL}/files/${fileId}`, {
+        method: "DELETE",
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+
+    if (!res.ok) {
+        throw new Error("Failed to delete file");
+    }
+
+    return res.json();
+}
+
+export interface MergePdfsResponse {
+    message: string;
+    file: {
+        _id: string;
+        originalName: string;
+        storedName: string;
+        fileType: string;
+        size: number;
+        operation: string;
+    };
+}
+
+export async function mergePdfs(fileIds: string[]): Promise<MergePdfsResponse> {
+    const token = getToken();
+
+    if (!token) {
+        throw new Error("Missing auth token");
+    }
+
+    const res = await fetch(`${BASE_URL}/files/merge`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ fileIds }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+        throw new Error(data?.message || "Failed to merge files");
+    }
+
+    return data as MergePdfsResponse;
+}

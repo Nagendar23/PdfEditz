@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { getFiles } from "@/services/api";
 import { FileType } from "@/types/file";
 import { useAuth } from "@/context/AuthContext";
@@ -116,12 +117,12 @@ export default function Dashboard() {
                     {user && <p className="text-sm text-slate-600">Signed in as {user.name}</p>}
                 </div>
                 <div className="flex items-center gap-3">
-                    <a
+                    <Link
                         href="/tools/merge"
                         className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100"
                     >
                         Merge PDFs
-                    </a>
+                    </Link>
                     <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
                         <input
                             type="file"
@@ -152,9 +153,9 @@ export default function Dashboard() {
                                 key={file._id}
                                 className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3 transition hover:border-slate-400 hover:bg-slate-50"
                             >
-                                <a href={`/editor/${file._id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
+                                <Link href={`/editor/${file._id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
                                     {file.originalName}
-                                </a>
+                                </Link>
                                 <button
                                     type="button"
                                     onClick={() => void handleDelete(file._id)}

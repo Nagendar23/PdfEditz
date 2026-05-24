@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useReducer } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useReducer } from "react";
 import { useRouter } from "next/navigation";
 import {
   getStoredAuth,
@@ -79,7 +79,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isReady: false,
   });
 
-  useEffect(() => {
+  const useAuthRestoreEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+  useAuthRestoreEffect(() => {
     const auth = getStoredAuth();
     dispatch({
       type: "restore",

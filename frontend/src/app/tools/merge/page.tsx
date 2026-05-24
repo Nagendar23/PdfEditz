@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ChangeEvent, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { mergePdfs, uploadPdf } from "@/services/fileService";
 
 type SelectedPdf = {
@@ -149,12 +150,12 @@ export default function MergeToolPage() {
                             Select PDFs, reorder them, and merge them into a new file.
                         </p>
                     </div>
-                    <a
+                    <Link
                         href="/dashboard"
                         className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-100"
                     >
                         Back to dashboard
-                    </a>
+                    </Link>
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">

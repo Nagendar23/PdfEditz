@@ -124,3 +124,40 @@ export async function mergePdfs(fileIds: string[]): Promise<MergePdfsResponse> {
 
     return data as MergePdfsResponse;
 }
+
+export interface ExtractPdfResponse {
+    success: boolean;
+    file: {
+        _id: string;
+        originalName: string;
+        storedName: string;
+        fileType: string;
+        size: number;
+        operation: string;
+    };
+}
+
+export async function extractPdfPages(fileId: string, pages: string): Promise<ExtractPdfResponse> {
+    const token = getToken();
+
+    if (!token) {
+        throw new Error("Missing auth token");
+    }
+
+    const res = await fetch(`${BASE_URL}/files/${fileId}/extract`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ pages }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+        throw new Error(data?.message || "Failed to extract pages");
+    }
+
+    return data as ExtractPdfResponse;
+}

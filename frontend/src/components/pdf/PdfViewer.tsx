@@ -63,6 +63,15 @@ interface DragPreviewState {
   y: number;
 }
 
+interface DragStartState {
+  id: string;
+  page: number;
+  startClientX: number;
+  startClientY: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 interface ResizePreviewState {
   id: string;
   type: "text" | "image";
@@ -156,6 +165,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
+  const [dragStart, setDragStart] = useState<DragStartState | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizePreview, setResizePreview] = useState<ResizePreviewState | null>(null);
 
@@ -175,6 +185,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     setEditingId(null);
     setDraggingId(null);
     setDragPreview(null);
+    setDragStart(null);
   }
 
   function updateOverlays(next: OverlayUpdate) {
@@ -295,15 +306,19 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       setDraggingId(null);
       setDragPreview(null);
     }
+    if (dragStart && !overlays.some((item) => item.id === dragStart.id)) {
+      setDragStart(null);
+    }
     if (resizingId && !overlays.some((item) => item.id === resizingId)) {
       setResizingId(null);
       setResizePreview(null);
     }
-  }, [overlays, activeId, editingId, draggingId, resizingId]);
+  }, [overlays, activeId, editingId, dragStart, draggingId, resizingId]);
 
   function handleSelectOverlay(id: string) {
     setDraggingId(null);
     setDragPreview(null);
+    setDragStart(null);
 
     if (activeId === id) {
       setEditingId(id);
@@ -326,6 +341,9 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
     if (draggingId === id) {
       setDraggingId(null);
       setDragPreview(null);
+    }
+    if (dragStart?.id === id) {
+      setDragStart(null);
     }
   }
 
@@ -534,17 +552,39 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
       return;
     }
 
-    if (!draggingId) return;
-
-    const draggingOverlay = overlays.find((o) => o.id === draggingId);
-    if (!draggingOverlay || draggingOverlay.page !== pageNumber) return;
-
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
     const normalizedX = Math.min(Math.max(x / rect.width, 0), 1);
     const normalizedY = Math.min(Math.max(y / rect.height, 0), 1);
+
+    if (dragStart && dragStart.page === pageNumber) {
+      const movedEnough =
+        Math.abs(event.clientX - dragStart.startClientX) >= 4 ||
+        Math.abs(event.clientY - dragStart.startClientY) >= 4;
+
+      if (!movedEnough) {
+        return;
+      }
+
+      if (draggingId !== dragStart.id) {
+        setDraggingId(dragStart.id);
+      }
+
+      setDragPreview({
+        id: dragStart.id,
+        page: pageNumber,
+        x: Math.min(Math.max(normalizedX - dragStart.offsetX, 0), 1),
+        y: Math.min(Math.max(normalizedY - dragStart.offsetY, 0), 1),
+      });
+      return;
+    }
+
+    if (!draggingId) return;
+
+    const draggingOverlay = overlays.find((o) => o.id === draggingId);
+    if (!draggingOverlay || draggingOverlay.page !== pageNumber) return;
 
     setDragPreview({
       id: draggingId,
@@ -555,7 +595,13 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
   }
 
   function stopDragging() {
-    if (!draggingId) {
+    if (!draggingId && !dragStart) {
+      setDragPreview(null);
+      return;
+    }
+
+    if (dragStart && !draggingId) {
+      setDragStart(null);
       setDragPreview(null);
       return;
     }
@@ -586,6 +632,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
     setDraggingId(null);
     setDragPreview(null);
+    setDragStart(null);
   }
 
   function stopResize() {
@@ -995,6 +1042,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
             return (
               <div
                 key={pageNumber}
+                data-pdf-page={pageNumber}
                 onClick={(event) => onPageBackgroundClick(pageNumber, event)}
                 onDoubleClick={(event) =>
                   onPageBackgroundDoubleClick(pageNumber, event)
@@ -1011,7 +1059,7 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                 style={{
                   position: "relative",
                   width: "fit-content",
-                  cursor: draggingId ? "grabbing" : "crosshair",
+                  cursor: draggingId || dragStart ? "grabbing" : "crosshair",
                   marginBottom: "12px",
                 }}
               >
@@ -1062,7 +1110,33 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
 
                           setActiveId(o.id);
                           setEditingId(null);
-                          setDraggingId(o.id);
+
+                          const pageElement = e.currentTarget.closest("[data-pdf-page]") as HTMLElement | null;
+                          const pageRect = pageElement?.getBoundingClientRect();
+
+                          if (!pageRect) {
+                            setDraggingId(o.id);
+                            setDragStart(null);
+                            setDragPreview({
+                              id: o.id,
+                              page: o.page,
+                              x: o.x,
+                              y: o.y,
+                            });
+                            return;
+                          }
+
+                          const pointerX = (e.clientX - pageRect.left) / pageRect.width;
+                          const pointerY = (e.clientY - pageRect.top) / pageRect.height;
+
+                          setDragStart({
+                            id: o.id,
+                            page: o.page,
+                            startClientX: e.clientX,
+                            startClientY: e.clientY,
+                            offsetX: pointerX - o.x,
+                            offsetY: pointerY - o.y,
+                          });
                           setDragPreview({
                             id: o.id,
                             page: o.page,
@@ -1182,10 +1256,6 @@ export default function PdfViewer({ fileUrl, fileId }: PdfViewerProps) {
                           />
                         ) : (
                           <span
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              handleSelectOverlay(o.id);
-                            }}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSelectOverlay(o.id);
